@@ -1,0 +1,81 @@
+=== T6 MQTT subscriber QA ===
+date: 2026-07-24T18:14:07Z
+publisher: docker exec mosquitto_pub
+
+--- health before ---
+{"status":"ok"}
+
+--- node-07 before ---
+{
+  "packetCount": 0,
+  "lastSeen": null,
+  "battery": null,
+  "status": "OFFLINE"
+}
+
+--- publish valid vital ---
+node-07 after valid vital:
+{
+  "packetCount": 1,
+  "lastSeen": "2026-07-24T18:14:07.307Z",
+  "battery": 80,
+  "status": "OFFLINE",
+  "isActive": true
+}
+
+--- publish bad JSON ---
+--- publish invalid priority PURPLE ---
+health after bad payloads:
+{"status":"ok"}
+packetCount after bad (expect 1): 1
+
+--- publish unknown node-ghost ---
+--- publish node status ---
+node-07 after status:
+{
+  "packetCount": 42,
+  "lastSeen": "2026-07-24T18:14:10.211Z",
+  "battery": 75,
+  "status": "ONLINE",
+  "rssi": -55,
+  "snr": 8.5,
+  "firmware": "1.0.0",
+  "isActive": true
+}
+
+--- publish station status ---
+station st-02 after status:
+{
+  "status": "ONLINE",
+  "lastSeen": "2026-07-24T18:14:11.330Z",
+  "isActive": true
+}
+
+--- health final ---
+{"status":"ok"}
+
+--- app log mqtt lines ---
+[Nest] 65830  - 07/25/2026, 1:12:52 AM     LOG [MqttService] Connecting to MQTT broker at mqtt://localhost:1883
+[Nest] 65830  - 07/25/2026, 1:12:52 AM     LOG [MqttService] mqtt connected
+[Nest] 65830  - 07/25/2026, 1:12:52 AM     LOG [MqttService] Subscribed to topics: triagebox/+/+/vital, triagebox/+/+/status, triagebox/+/status
+[Nest] 65830  - 07/25/2026, 1:14:07 AM     LOG [MqttService] Received vital for node 'node-07' (priority: GREEN, hr: 90, spo2: 98)
+[Nest] 65830  - 07/25/2026, 1:14:08 AM    WARN [MqttService] Invalid JSON payload received on topic 'triagebox/st-02/node-07/vital': not-json{{{
+[Nest] 65830  - 07/25/2026, 1:14:09 AM    WARN [MqttService] Invalid vital payload for node 'node-07': [
+[Nest] 65830  - 07/25/2026, 1:14:09 AM    WARN [MqttService] Received vital for unknown node 'node-ghost' or station mismatch
+[Nest] 65830  - 07/25/2026, 1:14:10 AM     LOG [MqttService] Updated node 'node-07' status to ONLINE
+[Nest] 65830  - 07/25/2026, 1:14:11 AM     LOG [MqttService] Updated station 'st-02' status to ONLINE
+
+--- soft-delete reactivate via vital ---
+isActive before: false (soft-deleted)
+isActive after vital: true
+log: Reactivated soft-deleted node 'node-07'
+
+=== PASS criteria ===
+mqtt connected: yes
+valid vital increments packetCount + lastSeen: yes
+bad JSON / PURPLE drop, health ok: yes
+unknown node drop: yes
+node status fields update: yes
+station status update: yes
+soft-delete markActive: yes
+build: pass

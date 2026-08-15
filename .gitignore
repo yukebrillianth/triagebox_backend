@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+*.tsbuildinfo
+.sisyphus/
+app.log
+.DS_Store
