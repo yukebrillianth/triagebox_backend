@@ -74,6 +74,9 @@ curl -s 'localhost:3001/api/nodes?includeInactive=true' | jq 'length'  # 10
 
 Kontrak lengkap REST/MQTT/WS: [`docs/api-contract.md`](docs/api-contract.md).
 
+Panduan firmware station (ESP32 + W5500 → MQTT):
+[`docs/station-firmware-mqtt.md`](docs/station-firmware-mqtt.md).
+
 ## 7. Arsitektur singkat + MQTT
 
 ```
