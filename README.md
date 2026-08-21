@@ -77,6 +77,9 @@ Kontrak lengkap REST/MQTT/WS: [`docs/api-contract.md`](docs/api-contract.md).
 Panduan firmware station (ESP32 + W5500 → MQTT):
 [`docs/station-firmware-mqtt.md`](docs/station-firmware-mqtt.md).
 
+Perubahan yang diminta ke firmware station Andika:
+[`docs/station-change-request.md`](docs/station-change-request.md).
+
 ## 7. Arsitektur singkat + MQTT
 
 ```

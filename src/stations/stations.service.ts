@@ -3,12 +3,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Station } from '@prisma/client';
+import { PendingStation, Station } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AdoptStationDto } from './dto/adopt-station.dto';
 import { CreateStationDto } from './dto/create-station.dto';
 import { UpdateStationDto } from './dto/update-station.dto';
 
-export type { Station };
+export type { PendingStation, Station };
 export type StationWithNodeCount = Station & { nodeCount: number };
 
 type StationRow = Station & { _count: { nodes: number } };
@@ -107,5 +108,84 @@ export class StationsService {
       select: { id: true },
     });
     if (!exists) throw new NotFoundException(`Station '${id}' not found`);
+  }
+
+  findPending(): Promise<PendingStation[]> {
+    return this.prisma.pendingStation.findMany({
+      orderBy: { firstSeen: 'asc' },
+    });
+  }
+
+  /** Record an announce from a station whose id is not registered. */
+  upsertPending(data: {
+    mac: string;
+    announcedStationId: string;
+    ip?: string;
+    firmware?: string;
+    nodeCount?: number;
+  }): Promise<PendingStation> {
+    const { mac, ...rest } = data;
+    return this.prisma.pendingStation.upsert({
+      where: { mac },
+      create: { mac, ...rest },
+      update: rest,
+    });
+  }
+
+  async dismissPending(mac: string): Promise<PendingStation> {
+    const pending = await this.prisma.pendingStation.findUnique({
+      where: { mac },
+    });
+    if (!pending) {
+      throw new NotFoundException(`Pending station '${mac}' not found`);
+    }
+    return this.prisma.pendingStation.delete({ where: { mac } });
+  }
+
+  /**
+   * Turn a pending candidate into a real Station plus its nodes, in one
+   * transaction. `nodeCount` node ids are generated as `node-NN` because that is
+   * exactly what the firmware formats from its uint8 radio address -- deriving
+   * both from one number is what stops the two sides from disagreeing.
+   */
+  async adopt(dto: AdoptStationDto): Promise<StationWithNodeCount> {
+    const pending = await this.prisma.pendingStation.findUnique({
+      where: { mac: dto.mac },
+    });
+    if (!pending) {
+      throw new NotFoundException(`Pending station '${dto.mac}' not found`);
+    }
+    const nodeCount = dto.nodeCount ?? pending.nodeCount ?? 0;
+    const nodeIdBase = dto.nodeIdBase ?? 0;
+
+    try {
+      await this.prisma.$transaction([
+        this.prisma.station.create({
+          data: {
+            id: dto.id,
+            name: dto.name,
+            firmware: pending.firmware,
+            ipAddress: pending.ip,
+            notes: `Adopted from MAC ${pending.mac}`,
+          },
+        }),
+        ...Array.from({ length: nodeCount }, (_, i) => {
+          const n = nodeIdBase + i + 1;
+          const id = `node-${String(n).padStart(2, '0')}`;
+          return this.prisma.node.create({
+            data: { id, stationId: dto.id, name: `Node ${String(n).padStart(2, '0')}` },
+          });
+        }),
+        this.prisma.pendingStation.delete({ where: { mac: dto.mac } }),
+      ]);
+    } catch (err: unknown) {
+      if (isPrismaUniqueViolation(err)) {
+        throw new ConflictException(
+          `Station '${dto.id}' or one of its node ids already exists`,
+        );
+      }
+      throw err;
+    }
+    return this.findOne(dto.id);
   }
 }

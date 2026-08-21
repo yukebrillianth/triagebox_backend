@@ -8,6 +8,7 @@
     "start:prod": "node dist/main.js",
     "prisma:migrate": "prisma migrate dev",
     "prisma:generate": "prisma generate",
+    "check:station": "ts-node scripts/check-station-payload.ts",
     "seed": "ts-node scripts/seed.ts"
   },
   "dependencies": {

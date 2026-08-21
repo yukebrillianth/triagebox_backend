@@ -129,6 +129,11 @@ export class EventsGateway
     this.broadcast('station.status', event);
   }
 
+  @OnEvent('station.pending')
+  onStationPending(pending: unknown): void {
+    this.broadcast('station.pending', pending);
+  }
+
   @OnEvent('alert.created')
   onAlertCreated(alert: Alert): void {
     this.broadcast('alert.created', alert);

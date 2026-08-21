@@ -70,6 +70,27 @@ Example (binary-style):
 
 SVM note: `reasons` may be an empty array when the model has no reason codes.
 
+#### Required vs optional
+
+**`priority` (or `triage_level`) is the only mandatory measurement.** It drives triage, the KPIs and the alerts, so a reading without one has nothing to say. Everything else may be **omitted entirely**:
+
+| Field                                     | Required | Absent means |
+| ----------------------------------------- | -------- | ------------ |
+| `priority` / `triage_level`                | **yes**  | payload rejected |
+| `hr` / `heart_rate`                        | no       | `null`       |
+| `spo2`                                     | no       | `null`       |
+| `rr` / `respiratory_rate`                  | no       | `null`       |
+| `battery`                                  | no       | `null`       |
+| `confidence`                               | no       | `null`       |
+| `victim_rfid`                              | no       | `null` (no victim created) |
+| `bp_sys`, `bp_dia`, `ts`, `reasons`, `ecg_status`, `device_status`, `packet_counter`, `packet_version` | no | `null` / `[]` |
+
+**Absent is stored as `null`, never as `0`.** Producers must omit a key rather than substitute a zero: `hr` 0 is a dead patient, `spo2` 0 is asphyxia, `battery` 0 is a flat node, and `priority` 0 is BLACK. A fabricated zero is indistinguishable from a measured one. `VitalReading.hr`, `spo2`, `rr`, `battery` and `confidence` are nullable columns for the same reason.
+
+Numbers must be JSON numbers. There is no string coercion — `"hr": "90"` is rejected. Only `victim_rfid` accepts either a string or a number.
+
+`scripts/check-station-payload.ts` (`npm run check:station`) freezes this contract against the ESP32 station's real output; run it after touching `vitalSchema`.
+
 `packet_count` on node status also accepts alias `packet_counter`.
 
 ### Node status
@@ -116,13 +137,39 @@ Rules:
 - `packet_version` and CRC validation are **station-only** - backend accepts post-decode JSON and does not re-check CRC.
 - Unknown `station_id` / `node_id` on MQTT is dropped (pre-registration required).
 
+### Announce (adoption)
+
+- Topic: `triagebox/{station_id}/announce`
+- QoS: **1**, **retained**
+- Published on every successful MQTT connect, right after the ONLINE status.
+
+```json
+{
+  "station_id": "st-03",
+  "mac": "AA:BB:CC:DD:EE:FF",
+  "ip": "192.168.50.13",
+  "firmware": "1.0.0",
+  "node_count": 20
+}
+```
+
+`station_id` and `mac` are required; `ip`, `firmware` and `node_count` are optional.
+
+**The only topic that does not require pre-registration** — an unknown station is the point. It does not create a `Station`: the announce is recorded as a `PendingStation` keyed on `mac`, and an operator turns it into a real station via `POST /api/stations/adopt`. So `MQTT never creates a device` still holds; adoption is the visible door.
+
+`mac` is the identity because it is the only field a station cannot change from its own configuration. Everything else in the payload is a suggestion the operator may override when adopting.
+
+An announce whose `station_id` is already registered is ignored, not an error — the retained message is republished on every reconnect.
+
+Retained so a dashboard opened after the station booted still sees the candidate.
+
 ## Identity rules
 
-- Stations and nodes are pre-registered. MQTT never creates them.
-- A message from an unknown `station_id` or `node_id` is dropped and logged.
+- Stations and nodes are pre-registered, or adopted from an announce. MQTT never creates them directly.
+- A message from an unknown `station_id` or `node_id` is dropped and logged — except on `announce`.
 - A new non-null RFID auto-creates a victim; the same RFID identifies the same victim.
 - A node may be rebound to another victim by publishing another `victim_rfid`.
-- A null `victim_rfid` does not create a victim.
+- A null or absent `victim_rfid` does not create a victim.
 
 ## REST paths
 
@@ -139,6 +186,9 @@ All paths return JSON. List resources use arrays unless a wrapper is shown.
 | `GET /api/stations`                  | `Station[]`                                                                                                    |
 | `POST /api/stations`                 | station registration fields → `Station`                                                                        |
 | `GET/PATCH/DELETE /api/stations/:id` | `Station`                                                                                                      |
+| `GET /api/stations/pending`          | `PendingStation[]` — `{ mac, announcedStationId, ip, firmware, nodeCount, firstSeen, lastSeen }`               |
+| `POST /api/stations/adopt`           | `{ mac, id, name, nodeCount?, nodeIdBase? }` → `Station` (creates `node-NN` for `nodeCount` nodes)             |
+| `DELETE /api/stations/pending/:mac`  | `PendingStation` — removes the candidate without adopting                                                      |
 | `GET /api/alerts`                    | `Alert[]`                                                                                                      |
 | `GET /api/activity`                  | `Activity[]`                                                                                                   |
 | `GET /api/analytics/summary`         | `{ byPriority, hourlyTrend, activeNodes, avgBatteryByNode, latestSignalByNode }`                               |
@@ -208,9 +258,10 @@ Socket.IO broadcasts are fire-and-forget after database commit. There are no roo
 | `victim.created`          | `Victim` snapshot                                                           |
 | `victim.updated`          | `Victim` snapshot                                                           |
 | `victim.priority_changed` | `{ victimId, rfid, from, to, confidence, reasons, nodeId }`                 |
-| `vital.updated`           | `{ victimId, nodeId, hr, spo2, rr, bpSys?, bpDia?, battery, priority, ts }` |
+| `vital.updated`           | `{ victimId, nodeId, hr, spo2, rr, bpSys?, bpDia?, battery, priority, ts }` — every measurement may be `null` |
 | `node.status`             | `{ nodeId, status, battery?, rssi?, snr?, lastSeen }`                       |
 | `station.status`          | `{ stationId, status, lastSeen }`                                           |
+| `station.pending`         | `PendingStation` — a station is awaiting adoption                           |
 | `alert.created`           | `Alert`                                                                     |
 | `activity.created`        | `Activity`                                                                  |
 | `kpi.updated`             | `{ total, byPriority: { RED, YELLOW, GREEN, BLACK } }`                      |

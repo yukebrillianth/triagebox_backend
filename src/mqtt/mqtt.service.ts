@@ -4,6 +4,7 @@ import { DeviceStatus } from '@prisma/client';
 import * as mqtt from 'mqtt';
 import { AlertsService } from '../alerts/alerts.service';
 import {
+  announceSchema,
   nodeStatusSchema,
   parseTopic,
   stationStatusSchema,
@@ -11,6 +12,7 @@ import {
 } from '../common/mqtt-payload';
 import { NodesService } from '../nodes/nodes.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { StationsService } from '../stations/stations.service';
 
 @Injectable()
 export class MqttService implements OnModuleInit, OnModuleDestroy {
@@ -22,6 +24,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     private readonly nodesService: NodesService,
     private readonly eventEmitter: EventEmitter2,
     private readonly alerts: AlertsService,
+    private readonly stations: StationsService,
   ) {}
 
   onModuleInit(): void {
@@ -38,6 +41,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         'triagebox/+/+/vital',
         'triagebox/+/+/status',
         'triagebox/+/status',
+        'triagebox/+/announce',
       ];
       this.client?.subscribe(topics, (err) => {
         if (err) {
@@ -93,6 +97,8 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       }
       if (parsedTopic.kind === 'station_status') {
         await this.handleStationStatus(parsedTopic.stationId, json);
+      } else if (parsedTopic.kind === 'announce') {
+        await this.handleAnnounce(parsedTopic.stationId, json);
       } else if (parsedTopic.kind === 'node_status') {
         await this.handleNodeStatus(parsedTopic.stationId, parsedTopic.nodeId, json);
       } else if (parsedTopic.kind === 'vital') {
@@ -103,6 +109,41 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`Error processing MQTT topic '${topic}': ${msg}`);
     }
   }
+  /**
+   * The one topic that accepts an unregistered station: an unknown id is the
+   * point. Recorded as a candidate only -- MQTT still never creates a Station,
+   * an admin does that by adopting it.
+   */
+  private async handleAnnounce(stationId: string, json: unknown): Promise<void> {
+    const parsed = announceSchema.safeParse(json);
+    if (!parsed.success) {
+      this.logger.warn(
+        `Invalid announce payload for station '${stationId}': ${parsed.error.message}`,
+      );
+      return;
+    }
+    const existing = await this.prisma.station.findUnique({
+      where: { id: stationId },
+      select: { id: true },
+    });
+    if (existing) {
+      // Already adopted. The station republishes this retained on every connect,
+      // so ignoring it is the normal path, not an error.
+      return;
+    }
+    const pending = await this.stations.upsertPending({
+      mac: parsed.data.mac,
+      announcedStationId: parsed.data.station_id,
+      ip: parsed.data.ip,
+      firmware: parsed.data.firmware,
+      nodeCount: parsed.data.node_count,
+    });
+    this.eventEmitter.emit('station.pending', pending);
+    this.logger.log(
+      `Station '${stationId}' (MAC ${parsed.data.mac}) is awaiting adoption`,
+    );
+  }
+
   private async handleStationStatus(stationId: string, json: unknown): Promise<void> {
     const parsed = stationStatusSchema.safeParse(json);
     if (!parsed.success) {
@@ -237,7 +278,9 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         status: DeviceStatus.ONLINE,
         lastSeen: new Date(),
         packetCount: { increment: 1 },
-        ...(parsed.data.battery !== undefined && { battery: parsed.data.battery }),
+        // `!= null`: a station without a fuel gauge sends no battery at all, and
+        // writing null would wipe whatever the node status last reported.
+        ...(parsed.data.battery != null && { battery: parsed.data.battery }),
       },
     });
     if (prev === DeviceStatus.OFFLINE) {

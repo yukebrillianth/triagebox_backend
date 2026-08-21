@@ -116,18 +116,29 @@ station biner (alias hasil decode LoRa — backend menormalkannya sendiri):
 
 | Field                                | Wajib | Tipe                | Catatan                                                     |
 | ------------------------------------ | ----- | ------------------- | ----------------------------------------------------------- |
-| `victim_rfid`                        | ya    | string \| angka \| `null` | angka dikonversi ke string. `null` = belum ada korban   |
-| `heart_rate` (atau `hr`)             | ya    | number              | salah satu nama saja sudah cukup                            |
-| `spo2`                               | ya    | number              |                                                             |
-| `respiratory_rate` (atau `rr`)       | ya    | number              |                                                             |
-| `battery`                            | ya    | number              | persen 0–100                                                |
-| `confidence`                         | ya    | number              | `0–1` atau `0–100`; >1 dibagi 100, lalu di-*clamp* ke ≤ 1   |
-| `triage_level` (atau `priority`)     | ya    | int 0–3             | `0=BLACK 1=RED 2=YELLOW 3=GREEN`                            |
+| `triage_level` (atau `priority`)     | **ya** | int 0–3            | `0=BLACK 1=RED 2=YELLOW 3=GREEN`                            |
+| `victim_rfid`                        | tidak | string \| angka \| `null` | angka dikonversi ke string. absen/`null` = belum ada korban |
+| `heart_rate` (atau `hr`)             | tidak | number              | salah satu nama saja sudah cukup                            |
+| `spo2`                               | tidak | number              |                                                             |
+| `respiratory_rate` (atau `rr`)       | tidak | number              |                                                             |
+| `battery`                            | tidak | number              | persen 0–100                                                |
+| `confidence`                         | tidak | number              | `0–1` atau `0–100`; >1 dibagi 100, lalu di-*clamp* ke ≤ 1   |
 | `reasons`                            | tidak | array string        | default `[]`                                                |
 | `bp_sys`, `bp_dia`                   | tidak | number \| `null`    |                                                             |
 | `timestamp` (atau `ts`)              | tidak | epoch s / ms / ISO  | lihat peringatan di bawah                                   |
 | `ecg_status`, `device_status`        | tidak | string \| number    | disimpan apa adanya di baris pembacaan                      |
 | `packet_counter`, `packet_version`   | tidak | int                 | metadata; backend tidak memvalidasinya                      |
+
+**Hilangkan key, jangan tulis nol.** Field yang absen disimpan sebagai `null`,
+dan itu yang benar: `hr` 0 berarti pasien meninggal, `spo2` 0 berarti asfiksia,
+`battery` 0 berarti node mati. Nol karangan tidak bisa dibedakan dari nol
+terukur, jadi jangan pernah mengisi nilai pengganti untuk sensor yang belum
+siap — cukup hilangkan key-nya.
+
+`priority` satu-satunya pengecualian: ia menggerakkan triase, KPI, dan alert,
+jadi paket tanpa priority tidak punya makna. Kalau ESP32 belum memberi skor,
+**jangan publish vital itu sama sekali** — cukup biarkan node status yang
+menjaga liveness.
 
 Field asing yang tidak dikenal **diabaikan**, bukan ditolak — jadi menambah
 field diagnostik sendiri itu aman.
@@ -140,9 +151,8 @@ Ini penyebab yang paling sering:
 1. **Kirim angka sebagai string.** `"hr": "90"` **gagal**. Zod tidak melakukan
    koersi; hanya `victim_rfid` yang menerima angka maupun string. Serialisasi
    semua field numerik sebagai angka JSON tanpa tanda kutip.
-2. **`confidence`, `battery`, atau `spo2` hilang.** Ketiganya wajib. Kalau
-   sensor belum siap, jangan menghilangkan field-nya — kirim nilai terukur
-   terakhir, atau tahan paketnya.
+2. **`priority`/`triage_level` hilang.** Satu-satunya field wajib. Kalau belum
+   ada skor, tahan paketnya — jangan kirim priority palsu.
 3. **`triage_level` di luar 0–3.** Nilai 4 atau 255 (sentinel "unknown" yang
    umum di paket biner) langsung ditolak. Petakan dulu ke 0–3 di station.
 4. **`timestamp` dari `millis()`.** Lihat di bawah — ini yang paling sunyi
@@ -171,14 +181,15 @@ Jangan pernah mengirim `millis()`, `esp_timer_get_time()`, atau turunannya.
 
 ### Semantik `victim_rfid`
 
-| Nilai                     | Efek di backend                                              |
-| ------------------------- | ------------------------------------------------------------ |
-| RFID baru                 | membuat korban baru, mengikat ke node ini                    |
-| RFID yang sudah ada       | korban yang sama; node bisa berpindah ikatan ke korban itu   |
-| `null` atau string kosong | **tidak** membuat korban; hanya menyegarkan liveness node     |
+| Nilai                          | Efek di backend                                              |
+| ------------------------------ | ------------------------------------------------------------ |
+| RFID baru                      | membuat korban baru, mengikat ke node ini                    |
+| RFID yang sudah ada            | korban yang sama; node bisa berpindah ikatan ke korban itu   |
+| absen, `null`, atau string kosong | **tidak** membuat korban; hanya menyegarkan liveness node  |
 
-Sebelum tag dibaca, kirim `null` — jangan kirim placeholder seperti `"0"` atau
-`"unknown"`, karena itu akan membuat korban hantu yang harus dibersihkan manual.
+Sebelum tag dibaca, hilangkan key-nya atau kirim `null` — jangan kirim
+placeholder seperti `"0"` atau `"unknown"`, karena itu akan membuat korban hantu
+yang harus dibersihkan manual.
 
 ---
 
@@ -251,6 +262,15 @@ Nilai ini dari `.env` backend; sesuaikan kalau di deployment kalian berbeda.
 satu: setiap node harus muncul di salah satu dari dua topik itu minimal setiap
 **~40 detik** — beri margin di bawah 45 s supaya jitter jaringan tidak memicu
 alert offline palsu.
+
+**Jangan bergantung pada `vital` saja untuk liveness.** Vital bisa absen karena
+alasan yang sah — node belum diskor, jadi paketnya ditahan sesuai aturan di §3 —
+sementara node itu hidup dan menjawab setiap poll. Kalau status node hanya
+dipublish saat berubah, backend akan menandainya OFFLINE setelah 45 detik dan
+station tidak punya transisi apa pun untuk memperbaikinya: node hidup tampak mati
+selamanya. Karena itu **publish status node secara periodik**, bukan hanya saat
+transisi. Bonusnya `rssi`/`snr` di dashboard jadi nilai sekarang, bukan nilai
+sejak node itu terakhir berubah status.
 
 Cadence yang dipakai simulator dan aman sebagai titik awal:
 
@@ -378,7 +398,10 @@ static char stationTopic[64];
 ```
 
 Serialisasi dan publish — perhatikan `%d` untuk semua angka dan `null` tanpa
-tanda kutip saat RFID kosong:
+tanda kutip saat RFID kosong. Snippet ini mengasumsikan semua sensor terbaca;
+kalau ada yang tidak, **hilangkan key-nya** (lihat §3) — bangun bagian opsional
+sebagai potongan string terpisah, jangan sebagai argumen kondisional, karena
+`"%s%u"` dengan `("", 0)` akan menempelkan `0` ke angka sebelumnya:
 
 ```cpp
 static void publishVital(const Vital& v) {
@@ -575,7 +598,7 @@ dan cocokkan pesan yang muncul:
 | `Received vital for node 'x' (priority: …, hr: …)`    | **berhasil** — data masuk dan diproses                     |
 | `Ignored message on unhandled topic: …`               | pola topik salah; cek jumlah segmen dan ejaan `vital`       |
 | `Invalid JSON payload received on topic '…'`          | JSON rusak — sering karena buffer terpotong                 |
-| `Invalid vital payload for node '…': …`               | field wajib hilang atau tipenya salah; pesan Zod menyebutnya |
+| `Invalid vital payload for node '…': …`               | `priority` hilang, atau tipe field salah; pesan Zod menyebutnya |
 | `Received vital for node '…' under unknown station …` | `station_id` belum terdaftar                               |
 | `Received vital for unknown node '…' or station mismatch` | node belum terdaftar, atau terdaftar di station lain    |
 | `Drop vital: unknown or inactive station '…'`         | station terdaftar tapi sudah di-soft-delete                |
@@ -590,7 +613,8 @@ periksa `GET /api/health` — field `mqtt` harus `true`.
 - [ ] `station_id` dan semua `node_id` sudah terdaftar lewat REST atau seed
 - [ ] `node_id` di topik memakai ID string terdaftar, bukan `uint8` LoRa
 - [ ] Semua field numerik dikirim sebagai angka JSON, bukan string
-- [ ] `victim_rfid` selalu ada sebagai key; `null` saat tag belum terbaca
+- [ ] Key yang nilainya tidak diketahui **dihilangkan**, tidak diisi nol
+- [ ] Vital tanpa `priority` tidak dipublish sama sekali
 - [ ] `battery` dalam persen 0–100, bukan milivolt
 - [ ] `confidence` sudah diskalakan; sentinel biner tidak lolos apa adanya
 - [ ] `triage_level` dijamin 0–3 sebelum dikirim

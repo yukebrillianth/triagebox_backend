@@ -25,20 +25,31 @@ export function parseDeviceTs(ts?: string | number | null): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/*
+ * KEYS MAY BE ABSENT, AND ABSENT IS NOT ZERO. The station omits a key rather
+ * than sending 0 whenever a value is unknown, because every zero here means
+ * something clinical: hr 0 is a dead patient, spo2 0 is asphyxia, battery 0 is a
+ * flat node. Current node hardware has no fuel gauge at all, so `battery` is
+ * always absent -- requiring it dropped every real vital with one warn line.
+ *
+ * `priority` (or `triage_level`) stays mandatory: it drives triage, the KPIs and
+ * the alerts, so a reading without one has nothing to say in this system. The
+ * station suppresses those instead of publishing them.
+ */
 export const vitalSchema = z
   .object({
-    victim_rfid: rfidSchema,
+    victim_rfid: rfidSchema.optional(),
     hr: z.number().optional(),
     heart_rate: z.number().optional(),
-    spo2: z.number(),
+    spo2: z.number().optional(),
     rr: z.number().optional(),
     respiratory_rate: z.number().optional(),
     bp_sys: z.number().nullable().optional(),
     bp_dia: z.number().nullable().optional(),
-    battery: z.number(),
+    battery: z.number().optional(),
     priority: prioritySchema.optional(),
     triage_level: z.number().int().min(0).max(3).optional(),
-    confidence: confidenceSchema,
+    confidence: confidenceSchema.optional(),
     reasons: z.array(z.string()).default([]),
     ts: z.union([z.string(), z.number()]).optional(),
     timestamp: z.union([z.string(), z.number()]).optional(),
@@ -55,33 +66,23 @@ export const vitalSchema = z
         raw.triage_level <= 3),
     { message: 'priority or triage_level required', path: ['priority'] },
   )
-  .refine(
-    (raw) => (raw.hr ?? raw.heart_rate) !== undefined,
-    { message: 'hr or heart_rate required', path: ['hr'] },
-  )
-  .refine(
-    (raw) => (raw.rr ?? raw.respiratory_rate) !== undefined,
-    { message: 'rr or respiratory_rate required', path: ['rr'] },
-  )
   .transform((raw) => {
     const priority =
       raw.priority ??
       (raw.triage_level !== undefined
         ? TRIAGE_LEVEL_MAP[raw.triage_level]
         : undefined)!;
-    const hr = (raw.hr ?? raw.heart_rate)!;
-    const rr = (raw.rr ?? raw.respiratory_rate)!;
     const ts = raw.ts ?? raw.timestamp;
     return {
-      victim_rfid: raw.victim_rfid,
-      hr,
-      spo2: raw.spo2,
-      rr,
+      victim_rfid: raw.victim_rfid ?? null,
+      hr: raw.hr ?? raw.heart_rate ?? null,
+      spo2: raw.spo2 ?? null,
+      rr: raw.rr ?? raw.respiratory_rate ?? null,
       bp_sys: raw.bp_sys ?? null,
       bp_dia: raw.bp_dia ?? null,
-      battery: raw.battery,
+      battery: raw.battery ?? null,
       priority: priority as z.infer<typeof prioritySchema>,
-      confidence: raw.confidence,
+      confidence: raw.confidence ?? null,
       reasons: raw.reasons ?? [],
       ts,
       ecg_status:
@@ -111,21 +112,42 @@ export const stationStatusSchema = z.object({
   status: z.enum(['ONLINE', 'OFFLINE']),
 });
 
+/*
+ * Adoption announce. The ONE topic that does not require pre-registration -- an
+ * unknown station is the whole point. `mac` is the identity because it is the
+ * only field a station cannot change from its own configuration; everything else
+ * is a suggestion an admin may override when adopting.
+ */
+export const announceSchema = z.object({
+  station_id: z.string().min(1).max(64),
+  mac: z.string().min(1).max(64),
+  ip: z.string().max(64).optional(),
+  firmware: z.string().max(64).optional(),
+  node_count: z.number().int().min(1).max(255).optional(),
+});
+
 export type Priority = z.infer<typeof prioritySchema>;
 export type VitalPayload = z.output<typeof vitalSchema>;
 export type NodeStatusPayload = z.infer<typeof nodeStatusSchema>;
 export type StationStatusPayload = z.infer<typeof stationStatusSchema>;
+export type AnnouncePayload = z.infer<typeof announceSchema>;
 
 export type ParsedTopic =
   | { kind: 'vital'; stationId: string; nodeId: string }
   | { kind: 'node_status'; stationId: string; nodeId: string }
-  | { kind: 'station_status'; stationId: string };
+  | { kind: 'station_status'; stationId: string }
+  | { kind: 'announce'; stationId: string };
 
 export function parseTopic(topic: string): ParsedTopic | null {
   const parts = topic.split('/');
 
-  if (parts.length === 3 && parts[0] === 'triagebox' && parts[1] && parts[2] === 'status') {
-    return { kind: 'station_status', stationId: parts[1] };
+  if (parts.length === 3 && parts[0] === 'triagebox' && parts[1]) {
+    if (parts[2] === 'status') {
+      return { kind: 'station_status', stationId: parts[1] };
+    }
+    if (parts[2] === 'announce') {
+      return { kind: 'announce', stationId: parts[1] };
+    }
   }
 
   if (
@@ -162,7 +184,11 @@ const _chk = vitalSchema.safeParse({
 if (!_chk.success) {
   throw new Error('Vital binary-compat self-check failed: ' + _chk.error.message);
 }
-if (Math.abs(_chk.data.confidence - 0.91) > 1e-9 || _chk.data.priority !== 'GREEN') {
+if (
+  _chk.data.confidence === null ||
+  Math.abs(_chk.data.confidence - 0.91) > 1e-9 ||
+  _chk.data.priority !== 'GREEN'
+) {
   throw new Error('Vital binary-compat self-check value mismatch');
 }
 const _legacy = vitalSchema.safeParse({
@@ -178,4 +204,65 @@ const _legacy = vitalSchema.safeParse({
 });
 if (!_legacy.success) {
   throw new Error('Vital legacy self-check failed: ' + _legacy.error.message);
+}
+
+/*
+ * What the ESP32 station actually emits on today's hardware: no fuel gauge, so no
+ * `battery`; no tag scanned yet, so no `victim_rfid` key at all. This shape used
+ * to be rejected, which meant every real vital was dropped -- so it is asserted
+ * here rather than left to an integration test nobody runs without a board.
+ */
+const _station = vitalSchema.safeParse({
+  hr: 118,
+  spo2: 91,
+  rr: 28,
+  priority: 'RED',
+  confidence: 0.87,
+  packet_counter: 1421,
+  device_status: 0,
+});
+if (!_station.success) {
+  throw new Error('Vital station self-check failed: ' + _station.error.message);
+}
+if (
+  _station.data.victim_rfid !== null ||
+  _station.data.battery !== null ||
+  _station.data.priority !== 'RED'
+) {
+  throw new Error('Vital station self-check value mismatch');
+}
+
+/* Absent must stay absent, never become 0: a fabricated zero is indistinguishable
+ * from a measured one, and 0 hr / 0 spo2 / 0 battery all read as emergencies. */
+const _sparse = vitalSchema.safeParse({ priority: 'BLACK' });
+if (!_sparse.success) {
+  throw new Error('Vital sparse self-check failed: ' + _sparse.error.message);
+}
+if (
+  _sparse.data.hr !== null ||
+  _sparse.data.spo2 !== null ||
+  _sparse.data.rr !== null ||
+  _sparse.data.confidence !== null
+) {
+  throw new Error('Vital sparse self-check must yield null, not 0');
+}
+
+/* Priority is the one field that stays mandatory. */
+if (vitalSchema.safeParse({ hr: 90, spo2: 98, rr: 18 }).success) {
+  throw new Error('Vital self-check: a vital without priority must be rejected');
+}
+if (vitalSchema.safeParse({ hr: '90', priority: 'RED' }).success) {
+  throw new Error('Vital self-check: numbers as strings must be rejected');
+}
+
+/* Topic routing: announce must be recognised, and must not be mistaken for the
+ * station status topic that sits at the same depth. */
+const _announceTopic = parseTopic('triagebox/st-01/announce');
+const _statusTopic = parseTopic('triagebox/st-01/status');
+if (
+  _announceTopic?.kind !== 'announce' ||
+  _statusTopic?.kind !== 'station_status' ||
+  parseTopic('triagebox/st-01/unknown') !== null
+) {
+  throw new Error('parseTopic self-check failed');
 }

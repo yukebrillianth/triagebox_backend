@@ -11,12 +11,13 @@ import { UpdateVictimDto } from './dto/update-victim.dto';
 
 export interface VitalDataPayload {
   priority: Priority;
-  confidence: number;
+  /** null when the node reported no confidence for this reading. */
+  confidence: number | null;
   reasons: string[];
-  hr?: number;
-  spo2?: number;
-  rr?: number;
-  battery?: number;
+  hr?: number | null;
+  spo2?: number | null;
+  rr?: number | null;
+  battery?: number | null;
 }
 
 export interface UpsertVitalResult {

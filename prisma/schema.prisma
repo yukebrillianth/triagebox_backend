@@ -86,14 +86,17 @@ model VitalReading {
   victimId     String
   victim       Victim   @relation(fields: [victimId], references: [id])
   nodeId       String
-  hr           Int
-  spo2         Int
-  rr           Int
+  /// Nullable because the station omits a key rather than sending 0: hr 0 is a
+  /// dead patient and battery 0 is a flat node, so an invented zero would be
+  /// indistinguishable from a measured one. Node hardware has no fuel gauge.
+  hr           Int?
+  spo2         Int?
+  rr           Int?
   bpSys        Int?
   bpDia        Int?
-  battery      Int
+  battery      Int?
   priority     Priority
-  confidence   Float
+  confidence   Float?
   reasons      Json
   /// NORMAL / ABNORMAL / "0" / "1" from node (not raw ECG)
   ecgStatus    String?
@@ -144,4 +147,18 @@ model ActivityLog {
 model Setting {
   key   String @id
   value String
+}
+
+/// A station publishing on `triagebox/{id}/announce` whose id is not registered
+/// yet. Kept out of `Station` on purpose: MQTT still never creates a device, an
+/// admin does. Keyed on MAC because that is the only identity a station cannot
+/// change from its own configuration.
+model PendingStation {
+  mac                String   @id
+  announcedStationId String
+  ip                 String?
+  firmware           String?
+  nodeCount          Int?
+  firstSeen          DateTime @default(now())
+  lastSeen           DateTime @updatedAt
 }

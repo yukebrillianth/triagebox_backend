@@ -76,7 +76,9 @@ export class IngestService {
         data: {
           status: DeviceStatus.ONLINE,
           lastSeen: receivedAt,
-          ...(payload.battery !== undefined && { battery: payload.battery }),
+          // `!= null`, not `!== undefined`: a vital may now carry battery: null
+          // (no fuel gauge), and writing that would wipe a valid node reading.
+          ...(payload.battery != null && { battery: payload.battery }),
         },
       });
       return;
@@ -146,7 +148,7 @@ export class IngestService {
           status: DeviceStatus.ONLINE,
           lastSeen: receivedAt,
           currentVictimId: upsert.victim.id,
-          ...(payload.battery !== undefined && { battery: payload.battery }),
+          ...(payload.battery != null && { battery: payload.battery }),
         },
       }),
       ...(historyData
