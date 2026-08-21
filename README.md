@@ -80,6 +80,13 @@ Panduan firmware station (ESP32 + W5500 → MQTT):
 Perubahan yang diminta ke firmware station Andika:
 [`docs/station-change-request.md`](docs/station-change-request.md).
 
+Pengujian lapangan (jarak, latensi, kapasitas node, baterai) — protokol dan angka
+untuk laporan ada di repo station, `docs/pengujian-lapangan.md`. Perekamnya:
+
+```bash
+npm run field-test -- --label "50m LOS" --minutes 5
+```
+
 ## 7. Arsitektur singkat + MQTT
 
 ```

@@ -9,6 +9,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:generate": "prisma generate",
     "check:station": "ts-node scripts/check-station-payload.ts",
+    "field-test": "node scripts/field-test.js",
     "seed": "ts-node scripts/seed.ts"
   },
   "dependencies": {
