@@ -163,9 +163,10 @@ export class AlertsService {
       select: { battery: true },
     });
     if (!reading) return;
-    /* No gauge, no edge. `null < batteryLowPct` coerces to 0 < 20 and would fire
-     * a low-battery alert on every reading from every node without a fuel gauge
-     * -- which is all of them on current hardware. */
+    /* No reading, no edge. `null < batteryLowPct` coerces to 0 < 20 and would
+     * fire a low-battery alert on every vital whose gauge had not reported yet --
+     * every node for its first cycles after boot, and forever on any node whose
+     * PMIC read keeps failing. */
     if (reading.battery === null) return;
     await this.handleBatteryEdge(
       event.nodeId,

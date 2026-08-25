@@ -23,17 +23,15 @@ asli. Hasil sebelum perbaikan:
 
 | Keadaan node | Hasil | Field yang bikin ditolak |
 | --- | --- | --- |
-| Ada skor, tanpa fuel gauge, tanpa tag | REJECT | `victim_rfid`, `battery` |
+| Ada skor, gauge belum terbaca, tanpa tag | REJECT | `victim_rfid`, `battery` |
 | Ada skor, tag terbaca | REJECT | `battery` |
 | Ada gauge + jam tersinkron | accept | — |
 | Belum diskor (baru boot) | REJECT | `victim_rfid`, `battery`, `confidence` |
 | Sensor belum siap | REJECT | `victim_rfid`, `spo2`, `battery`, `confidence` |
 | Sensor SpO2 mati | REJECT | `spo2` |
 
-Lima dari enam ditolak, dan yang lolos justru satu-satunya yang hardware sekarang
-belum bisa hasilkan. Karena node tidak punya fuel gauge sama sekali, `battery`
-selalu absen — jadi **setiap vital dari station akan dibuang**, dengan satu baris
-`warn` di log backend sebagai satu-satunya jejak.
+Lima dari enam ditolak, dan yang lolos justru satu-satunya yang hardware saat itu
+belum bisa hasilkan.
 
 Prinsip "keys are omitted, never zeroed" di `tb_vital_json.c:71` **benar** dan
 backend yang mengalah: `victim_rfid`, `hr`, `spo2`, `rr`, `battery`, dan
@@ -41,10 +39,19 @@ backend yang mengalah: `victim_rfid`, `hr`, `spo2`, `rr`, `battery`, dan
 tulis di sana — 0 hr itu pasien meninggal, 0 battery itu node mati — persis alasan
 kenapa memaksa nilai pengganti akan lebih buruk.
 
-Saya juga konfirmasi ke sumbernya, bukan cuma ke dokumen: `main.c:1158` di
+Saya juga konfirmasi ke sumbernya, bukan cuma ke dokumen: `main.c` di
 `triagebox_stm32_node` memang mengirim `0xFF /* battery: not measured on this
-board */`. Board node tidak punya rangkaian pengukur baterai sama sekali, jadi
-`battery` bukan kadang-kadang absen — selalu.
+board */`, jadi `battery` bukan kadang-kadang absen — selalu.
+
+**Koreksi, 2026-08-25:** alasannya bukan "tidak ada fuel gauge". Board node punya
+PMIC SW6106 dengan fuel gauge sungguhan di I²C `0x3c`, dibaca
+`ui_board_battery()` dan sudah tampil di LCD node. Masalahnya arah: gauge itu ada
+di sisi ESP32, sementara paket LoRa dibangun STM32, dan peta register tidak punya
+jalur untuk menyeberangkannya. Sudah diperbaiki dengan satu register baru
+(`TB_REG_HOST_BATTERY 0x43`) — ESP32 menuliskan persennya, STM32 memakainya untuk
+`lora_vital.battery`. Jadi `battery` sekarang nyata; yang tetap benar adalah
+`battery` harus opsional, karena 0xFF masih muncul di detik-detik pertama setelah
+boot dan saat pembacaan PMIC gagal.
 
 Ada regression check permanen di backend (`npm run check:station`) yang memuat
 keenam output itu, jadi kalau backend memperketat skemanya lagi, itu ketahuan

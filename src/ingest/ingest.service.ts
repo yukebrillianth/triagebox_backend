@@ -77,7 +77,7 @@ export class IngestService {
           status: DeviceStatus.ONLINE,
           lastSeen: receivedAt,
           // `!= null`, not `!== undefined`: a vital may now carry battery: null
-          // (no fuel gauge), and writing that would wipe a valid node reading.
+          // (gauge not read), and writing that would wipe a valid node reading.
           ...(payload.battery != null && { battery: payload.battery }),
         },
       });

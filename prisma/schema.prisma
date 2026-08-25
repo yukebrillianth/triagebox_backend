@@ -88,7 +88,8 @@ model VitalReading {
   nodeId       String
   /// Nullable because the station omits a key rather than sending 0: hr 0 is a
   /// dead patient and battery 0 is a flat node, so an invented zero would be
-  /// indistinguishable from a measured one. Node hardware has no fuel gauge.
+  /// indistinguishable from a measured one. A sensor that is not ready, or a
+  /// gauge read that failed, arrives as an absent key and lands here as null.
   hr           Int?
   spo2         Int?
   rr           Int?
