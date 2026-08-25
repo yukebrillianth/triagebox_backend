@@ -29,8 +29,9 @@ export function parseDeviceTs(ts?: string | number | null): Date | null {
  * KEYS MAY BE ABSENT, AND ABSENT IS NOT ZERO. The station omits a key rather
  * than sending 0 whenever a value is unknown, because every zero here means
  * something clinical: hr 0 is a dead patient, spo2 0 is asphyxia, battery 0 is a
- * flat node. Current node hardware has no fuel gauge at all, so `battery` is
- * always absent -- requiring it dropped every real vital with one warn line.
+ * flat node. A sensor that is not ready and a fuel-gauge read that failed both
+ * arrive as an absent key -- requiring them dropped every real vital with one
+ * warn line.
  *
  * `priority` (or `triage_level`) stays mandatory: it drives triage, the KPIs and
  * the alerts, so a reading without one has nothing to say in this system. The
@@ -207,10 +208,11 @@ if (!_legacy.success) {
 }
 
 /*
- * What the ESP32 station actually emits on today's hardware: no fuel gauge, so no
- * `battery`; no tag scanned yet, so no `victim_rfid` key at all. This shape used
- * to be rejected, which meant every real vital was dropped -- so it is asserted
- * here rather than left to an integration test nobody runs without a board.
+ * The sparsest shape the ESP32 station really emits: the gauge has not reported
+ * yet (or its read failed), so no `battery`; no tag scanned yet, so no
+ * `victim_rfid` key at all. This shape used to be rejected, which meant every
+ * real vital was dropped -- so it is asserted here rather than left to an
+ * integration test nobody runs without a board.
  */
 const _station = vitalSchema.safeParse({
   hr: 118,

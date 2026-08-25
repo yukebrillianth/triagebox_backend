@@ -22,17 +22,17 @@ import { vitalSchema } from '../src/common/mqtt-payload';
 /** [label, station JSON, must the backend accept it] */
 const CASES: [string, string, boolean][] = [
   [
-    'scored, no fuel gauge, no tag (today’s hardware)',
+    'scored, gauge not read yet, no tag (first cycles after boot)',
     '{"hr":118,"spo2":91,"rr":28,"priority":"RED","confidence":0.87,"packet_counter":1421,"device_status":0}',
     true,
   ],
   [
-    'scored, tag scanned',
+    'scored, tag scanned, gauge read failed',
     '{"victim_rfid":"04A2B3","hr":118,"spo2":91,"rr":28,"priority":"RED","confidence":0.87,"packet_counter":1421,"device_status":0}',
     true,
   ],
   [
-    'future board: fuel gauge + synced clock',
+    'steady state: PMIC gauge + a synced clock (clock still future)',
     '{"victim_rfid":"04A2B3","hr":118,"spo2":91,"rr":28,"battery":76,"priority":"RED","confidence":0.87,"packet_counter":1421,"device_status":0,"ts":1755500000}',
     true,
   ],
