@@ -85,6 +85,19 @@ for (const [label, json, shouldAccept] of CASES) {
       console.error(`FAIL  ${label}\n      absent keys became non-null: ${zeroed.join(', ')}`);
       continue;
     }
+    // The station sends the bare card UID; the id a human ever sees is TB- plus
+    // that, upper case. Checked here because the station is the only producer, so
+    // this is where a firmware that started sending its own prefix would show up
+    // as TB-TB-.
+    const raw = JSON.parse(json).victim_rfid as string | undefined;
+    const want = raw === undefined ? null : `TB-${raw.toUpperCase()}`;
+    if (r.data.victim_rfid !== want) {
+      failed++;
+      console.error(
+        `FAIL  ${label}\n      victim_rfid: got ${String(r.data.victim_rfid)}, want ${String(want)}`,
+      );
+      continue;
+    }
   }
   console.log(`ok    ${shouldAccept ? 'accept' : 'reject'}  ${label}`);
 }

@@ -10,9 +10,44 @@ const confidenceSchema = z.number().transform((v) => {
   return v;
 });
 
+/*
+ * Patient ids are `TB-` plus the card's UID in upper-case hex, and this is where
+ * that becomes true. Applied on ingest rather than on the radio for two reasons.
+ *
+ * The prefix never varies, so putting it in the LoRa packet would pay three bytes
+ * of airtime per reading, four times a minute per node, forever, to transmit a
+ * constant. Same reasoning that keeps TB_PPG_FS_HZ a compile-time constant instead
+ * of a wire field. It would also break the node's
+ * _Static_assert(PN532_UID_MAX * 2 <= LORA_VITAL_RFID_MAX) -- that is 20 <= 20
+ * with no slack, and the assert is there to stop a truncated id from attaching one
+ * patient's vitals to another.
+ *
+ * IDEMPOTENT ON PURPOSE. Victim.rfid is @unique, so a second spelling of the same
+ * card is a second patient. A retained message replayed after a restart, or a
+ * station that one day starts sending the prefix itself, must not produce
+ * TB-TB-04A2B3.
+ *
+ * Upper-casing is belt and braces: the node's hex is already upper (k_hex in the
+ * STM32's main.c), but a hand-rolled mosquitto_pub is whatever someone typed, and
+ * `tb-04a2b3` and `TB-04A2B3` are the same card.
+ *
+ * `T` cannot appear in hex, so a real UID can never be mistaken for an
+ * already-prefixed id.
+ *
+ * The node's own LCD prints the same form -- see set_patient_id() in
+ * ui/logic/ui_bindings.c. If one side changes, change both, or the operator reads
+ * a different id off the device than the command post reads off the dashboard.
+ */
+export function normalizeRfid(raw: string): string | null {
+  const t = raw.trim().toUpperCase();
+
+  if (t === '') return null;
+  return t.startsWith('TB-') ? t : `TB-${t}`;
+}
+
 const rfidSchema = z
   .union([z.string(), z.number(), z.null()])
-  .transform((v) => (v === null || v === undefined ? null : String(v)));
+  .transform((v) => (v === null || v === undefined ? null : normalizeRfid(String(v))));
 
 export function parseDeviceTs(ts?: string | number | null): Date | null {
   if (ts === undefined || ts === null || ts === '') return null;
@@ -191,6 +226,23 @@ if (
   _chk.data.priority !== 'GREEN'
 ) {
   throw new Error('Vital binary-compat self-check value mismatch');
+}
+/*
+ * The id rule, pinned where it is cheapest to notice a break: a numeric tag gets
+ * the prefix, lower case is folded up, and an id that already carries the prefix
+ * is left alone rather than gaining a second one. That last case is the one that
+ * would silently split one patient into two rows.
+ */
+if (_chk.data.victim_rfid !== 'TB-3021') {
+  throw new Error('RFID prefix self-check failed: ' + String(_chk.data.victim_rfid));
+}
+if (
+  normalizeRfid('tb-04a2b3') !== 'TB-04A2B3' ||
+  normalizeRfid('TB-04A2B3') !== 'TB-04A2B3' ||
+  normalizeRfid('04a2b3') !== 'TB-04A2B3' ||
+  normalizeRfid('  ') !== null
+) {
+  throw new Error('RFID normalize self-check failed');
 }
 const _legacy = vitalSchema.safeParse({
   victim_rfid: '3021',
