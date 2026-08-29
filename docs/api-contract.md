@@ -42,7 +42,7 @@ Binary-decoder aliases (station JSON after LoRa decode). Backend normalizes to t
 | `heart_rate`         | `hr`                |                                                                 |
 | `respiratory_rate`   | `rr`                |                                                                 |
 | `confidence`         | `confidence`        | `0–1` float **or** `0–100` percent → stored as `0–1`            |
-| `victim_rfid`        | `victim_rfid`       | string or number → string                                       |
+| `victim_rfid`        | `victim_rfid`       | string or number → `TB-` + upper case (see below)                |
 | `ecg_status`         | (stored on reading) | optional string/number → string                                 |
 | `device_status`      | (stored on reading) | optional string/number → string                                 |
 | `packet_counter`     | (optional meta)     | not required for ingest                                         |
@@ -67,6 +67,23 @@ Example (binary-style):
 ```
 
 `victim_rfid` may be `null`. `bp_sys`, `bp_dia`, and `ts`/`timestamp` may be omitted; blood-pressure fields may also be `null`.
+
+**Patient ids are normalized on ingest to `TB-` plus the card UID in upper case.**
+The station sends the bare UID (`04a2b3`, or a number from the simulator) and
+`Victim.rfid` stores `TB-04A2B3`, which is the form every REST response, WebSocket
+event and report carries. Normalization is idempotent, so a payload that already
+has the prefix is not double-prefixed. `T` never occurs in hex, so a real UID
+cannot be mistaken for an already-prefixed id.
+
+The prefix is not on the LoRa wire, deliberately: it is a constant, so sending it
+would spend three bytes of airtime per reading to transmit something that never
+changes, and the node's RFID field is sized with no spare bytes. The node's own LCD
+prints the identical prefix locally so the operator and the dashboard name the same
+patient the same way.
+
+Because `Victim.rfid` is `@unique`, a database that already holds bare ids will
+treat the same card as a new patient after this change. For an existing dataset:
+`UPDATE "Victim" SET rfid = 'TB-' || upper(rfid) WHERE rfid NOT LIKE 'TB-%';`
 
 SVM note: `reasons` may be an empty array when the model has no reason codes.
 
