@@ -94,6 +94,7 @@ export class EventsGateway
       to: event.toPriority,
       confidence: event.confidence,
       reasons: event.reasons,
+      esi: event.esi ?? null,
       nodeId: event.nodeId,
     });
     void this.emitKpi();
@@ -115,6 +116,9 @@ export class EventsGateway
       bpDia: reading.bpDia ?? undefined,
       battery: reading.battery,
       priority: reading.priority as Priority | string,
+      // Raw ESI behind `priority`: null when the model refused to score, so the
+      // ESI 3 vs 5 distinction the colour collapses still reaches the dashboard.
+      esi: reading.esi,
       ts: reading.receivedAt,
     });
   }

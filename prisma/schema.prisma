@@ -99,6 +99,10 @@ model VitalReading {
   priority     Priority
   confidence   Float?
   reasons      Json
+  /// Raw ESI 1..5 from the on-device model, or null when it refused to score.
+  /// Per-reading, not per-victim: the device's colour collapses ESI 3/4/5 into
+  /// GREEN, so this column is the only place that distinction survives.
+  esi          Int?
   /// NORMAL / ABNORMAL / "0" / "1" from node (not raw ECG)
   ecgStatus    String?
   /// OK / ERROR / device_status uint from node
@@ -117,6 +121,9 @@ model TriageHistory {
   toPriority   Priority
   confidence   Float?
   reasons      Json?
+  /// ESI in force at the transition, when the model scored it -- the audit of a
+  /// verdict should carry the raw score the displayed verdict came from.
+  esi          Int?
   nodeId       String?
   createdAt    DateTime @default(now())
 }

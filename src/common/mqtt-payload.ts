@@ -11,6 +11,30 @@ const confidenceSchema = z.number().transform((v) => {
 });
 
 /*
+ * 'M'/'F' only. The station sends the ASCII byte it was handed and omits the key
+ * when it has none (LORA_VITAL_GENDER_NONE), so there is no 'U' on the wire to
+ * accept: an unasked gender is an absent key, and a fabricated 'U' would read
+ * downstream as a real answer. Case is folded because the station is not the only
+ * possible publisher -- a hand-rolled mosquitto_pub is whatever someone typed.
+ * (The operator may still PATCH a victim to 'U' over REST; that is a person
+ * saying "unknown", not a device inventing one.)
+ */
+const genderSchema = z
+  .string()
+  .transform((v) => v.trim().toUpperCase())
+  .pipe(z.enum(['M', 'F']));
+
+/*
+ * 0 is the wire's "nobody supplied this" for esi and age (LORA_VITAL_ESI_NONE,
+ * LORA_VITAL_AGE_NONE), not a value -- the ESI scale starts at 1 and no patient
+ * is 0 years old, so 0 stored would read as a class that does not exist or as a
+ * newborn. The station omits the key instead, but a 0 that does arrive must land
+ * as null, same as absent.
+ */
+const noneIfZero = (v: number | null | undefined): number | null =>
+  v == null || v === 0 ? null : v;
+
+/*
  * Patient ids are `TB-` plus the card's UID in upper-case hex, and this is where
  * that becomes true. Applied on ingest rather than on the radio for two reasons.
  *
@@ -86,6 +110,17 @@ export const vitalSchema = z
     priority: prioritySchema.optional(),
     triage_level: z.number().int().min(0).max(3).optional(),
     confidence: confidenceSchema.optional(),
+    // Raw ESI 1..5 from the model, or the 0 sentinel (see noneIfZero). The
+    // device's displayed colour collapses 3/4/5 into GREEN, so this is the only
+    // place that distinction survives -- 6 or -1 is a producer bug and is
+    // rejected rather than clamped into a class that looks scored.
+    esi: z.number().int().min(0).max(5).optional(),
+    // Years, not a band index: the number the model actually scored (the
+    // operator picks a band on the device and the firmware sends the band's
+    // clinical mid-point). The bound catches a mis-packed byte -- the wire byte
+    // holds 200 happily and no patient does.
+    age: z.number().int().min(0).max(120).optional(),
+    gender: genderSchema.optional(),
     reasons: z.array(z.string()).default([]),
     ts: z.union([z.string(), z.number()]).optional(),
     timestamp: z.union([z.string(), z.number()]).optional(),
@@ -119,6 +154,11 @@ export const vitalSchema = z
       battery: raw.battery ?? null,
       priority: priority as z.infer<typeof prioritySchema>,
       confidence: raw.confidence ?? null,
+      // `?? null` then noneIfZero, not a default of 0: absent and the 0
+      // sentinel must both land as null (never "0 years old", never "ESI 0").
+      esi: noneIfZero(raw.esi),
+      age: noneIfZero(raw.age),
+      gender: raw.gender ?? null,
       reasons: raw.reasons ?? [],
       ts,
       ecg_status:
@@ -274,6 +314,9 @@ const _station = vitalSchema.safeParse({
   confidence: 0.87,
   packet_counter: 1421,
   device_status: 0,
+  esi: 2,
+  age: 40,
+  gender: 'M',
 });
 if (!_station.success) {
   throw new Error('Vital station self-check failed: ' + _station.error.message);
@@ -281,7 +324,10 @@ if (!_station.success) {
 if (
   _station.data.victim_rfid !== null ||
   _station.data.battery !== null ||
-  _station.data.priority !== 'RED'
+  _station.data.priority !== 'RED' ||
+  _station.data.esi !== 2 ||
+  _station.data.age !== 40 ||
+  _station.data.gender !== 'M'
 ) {
   throw new Error('Vital station self-check value mismatch');
 }
@@ -296,9 +342,43 @@ if (
   _sparse.data.hr !== null ||
   _sparse.data.spo2 !== null ||
   _sparse.data.rr !== null ||
-  _sparse.data.confidence !== null
+  _sparse.data.confidence !== null ||
+  _sparse.data.esi !== null ||
+  _sparse.data.age !== null ||
+  _sparse.data.gender !== null
 ) {
   throw new Error('Vital sparse self-check must yield null, not 0');
+}
+
+/* The 0x02 wire's 0 sentinels: esi 0 and age 0 mean "not supplied" and must
+ * land as null, because ESI 0 is not a class that exists and age 0 would read
+ * as a newborn. gender lowercase is folded, and 'U' is rejected -- an unasked
+ * gender is an absent key, never a fabricated 'U'. */
+const _agev2 = vitalSchema.safeParse({
+  priority: 'GREEN',
+  esi: 0,
+  age: 0,
+  gender: 'f',
+});
+if (
+  !_agev2.success ||
+  _agev2.data.esi !== null ||
+  _agev2.data.age !== null ||
+  _agev2.data.gender !== 'F'
+) {
+  throw new Error('Vital v0x02 self-check failed');
+}
+if (vitalSchema.safeParse({ priority: 'GREEN', esi: 6 }).success) {
+  throw new Error('Vital self-check: esi outside 1..5 must be rejected');
+}
+if (vitalSchema.safeParse({ priority: 'GREEN', age: 121 }).success) {
+  throw new Error('Vital self-check: implausible age must be rejected');
+}
+if (vitalSchema.safeParse({ priority: 'GREEN', gender: 'U' }).success) {
+  throw new Error('Vital self-check: gender must be M or F only');
+}
+if (vitalSchema.safeParse({ priority: 'GREEN', age: '40' }).success) {
+  throw new Error('Vital self-check: age as a string must be rejected');
 }
 
 /* Priority is the one field that stays mandatory. */

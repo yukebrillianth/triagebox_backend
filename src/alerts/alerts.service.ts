@@ -11,6 +11,10 @@ export interface PriorityChangedEvent {
   toPriority: Priority;
   confidence: number;
   reasons: string[];
+  /** Raw ESI behind the new verdict, or null when the model did not score.
+   * Carried so the gateway can relay it; deliberately NOT used to derive an
+   * alert or a severity -- it is provenance for a verdict that already exists. */
+  esi?: number | null;
   nodeId: string;
   stationId: string;
 }

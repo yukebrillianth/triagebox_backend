@@ -18,6 +18,13 @@ export interface VitalDataPayload {
   spo2?: number | null;
   rr?: number | null;
   battery?: number | null;
+  /**
+   * Operator facts, not measurements: age in years and 'M'/'F'. null when the
+   * device never asked, which is most readings -- so they are only ever written,
+   * never blanked (see upsertFromVital).
+   */
+  age?: number | null;
+  gender?: string | null;
 }
 
 export interface UpsertVitalResult {
@@ -75,6 +82,10 @@ export class VictimsService {
           currentPriority: vitalData.priority,
           confidence: vitalData.confidence,
           reasons: vitalData.reasons as unknown as Prisma.InputJsonValue,
+          // `!= null`, not `!== undefined`: the device omits age/gender until the
+          // operator answers, and the column's own null already says "unknown".
+          ...(vitalData.age != null && { age: vitalData.age }),
+          ...(vitalData.gender != null && { gender: vitalData.gender }),
           firstSeen: receivedAt,
           lastUpdate: comparisonTime,
         },
@@ -149,6 +160,12 @@ export class VictimsService {
         currentPriority: vitalData.priority,
         confidence: vitalData.confidence,
         reasons: vitalData.reasons as unknown as Prisma.InputJsonValue,
+        // Write-only, never blank: the operator answers the Age screen once and
+        // every later reading omits the keys. `!== undefined` here would wipe an
+        // answered age back to unknown four times a minute. An operator PATCH is
+        // the way to correct one.
+        ...(vitalData.age != null && { age: vitalData.age }),
+        ...(vitalData.gender != null && { gender: vitalData.gender }),
         lastUpdate: comparisonTime,
       },
     });
