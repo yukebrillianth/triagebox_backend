@@ -92,6 +92,11 @@ export class IngestService {
       spo2: payload.spo2,
       rr: payload.rr,
       battery: payload.battery,
+      // Age and gender belong to the patient, not to the reading, so they go to
+      // the victim snapshot. `esi` is the model's score for THIS reading and
+      // stays on VitalReading below.
+      age: payload.age,
+      gender: payload.gender,
     };
 
     // 1) Victim snapshot (may skip update if stale by deviceTs).
@@ -118,6 +123,7 @@ export class IngestService {
             toPriority: upsert.toPriority,
             confidence: payload.confidence,
             reasons: payload.reasons as unknown as Prisma.InputJsonValue,
+            esi: payload.esi,
             nodeId,
           }
         : null;
@@ -135,6 +141,7 @@ export class IngestService {
           battery: payload.battery,
           priority: payload.priority as Priority,
           confidence: payload.confidence,
+          esi: payload.esi,
           reasons: payload.reasons as unknown as Prisma.InputJsonValue,
           ecgStatus: payload.ecg_status ?? null,
           deviceStatus: payload.device_status ?? null,
@@ -180,6 +187,7 @@ export class IngestService {
         toPriority: upsert.toPriority,
         confidence: payload.confidence,
         reasons: payload.reasons,
+        esi: payload.esi,
         nodeId,
         stationId,
       });

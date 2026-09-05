@@ -103,6 +103,9 @@ station biner (alias hasil decode LoRa — backend menormalkannya sendiri):
   "battery": 74,
   "triage_level": 1,
   "confidence": 93,
+  "esi": 2,
+  "age": 67,
+  "gender": "F",
   "reasons": ["hr_high", "spo2_low"],
   "timestamp": 1755500000,
   "ecg_status": 0,
@@ -123,6 +126,9 @@ station biner (alias hasil decode LoRa — backend menormalkannya sendiri):
 | `respiratory_rate` (atau `rr`)       | tidak | number              |                                                             |
 | `battery`                            | tidak | number              | persen 0–100                                                |
 | `confidence`                         | tidak | number              | `0–1` atau `0–100`; >1 dibagi 100, lalu di-*clamp* ke ≤ 1   |
+| `esi`                                | tidak | int 1–5             | ESI mentah dari model. absen (atau `0`) = model tidak memberi skor |
+| `age`                                | tidak | int 1–120           | **tahun**, bukan indeks band — kirim titik tengah band-nya   |
+| `gender`                             | tidak | `"M"` \| `"F"`      | absen = tidak ditanya. **Jangan** kirim `"U"`                 |
 | `reasons`                            | tidak | array string        | default `[]`                                                |
 | `bp_sys`, `bp_dia`                   | tidak | number \| `null`    |                                                             |
 | `timestamp` (atau `ts`)              | tidak | epoch s / ms / ISO  | lihat peringatan di bawah                                   |
@@ -134,6 +140,12 @@ dan itu yang benar: `hr` 0 berarti pasien meninggal, `spo2` 0 berarti asfiksia,
 `battery` 0 berarti node mati. Nol karangan tidak bisa dibedakan dari nol
 terukur, jadi jangan pernah mengisi nilai pengganti untuk sensor yang belum
 siap — cukup hilangkan key-nya.
+
+Aturan yang sama berlaku untuk `esi`/`age`/`gender` (LORA_VITAL_VERSION 0x02):
+di wire, ketiganya memakai `0` sebagai sentinel "tidak ada", dan backend
+memperlakukannya sama dengan key yang absen — `age` 0 akan terbaca sebagai
+bayi baru lahir dan `esi` 0 sebagai kelas yang tidak ada. `gender` tidak punya
+nilai `U`: gender yang belum ditanya itu key yang absen, bukan jawaban.
 
 `priority` satu-satunya pengecualian: ia menggerakkan triase, KPI, dan alert,
 jadi paket tanpa priority tidak punya makna. Kalau ESP32 belum memberi skor,

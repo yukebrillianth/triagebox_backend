@@ -16,6 +16,13 @@
  *
  * Kept as frozen strings rather than a cross-repo build step so this repo stays
  * standalone.
+ *
+ * EXCEPT the three `v0x02` cases: those are written from the field contract in
+ * the station's main/lora_vital.h (LORA_VITAL_VERSION 0x02, which appended
+ * esi/age/gender after confidence), because tb_vital_json.c does not emit the
+ * three keys yet -- the node and station are being flashed for it. Re-derive them
+ * from the emitter once it does; the shapes are what the backend must already
+ * accept when it does, and this is where a mismatch will surface.
  */
 import { vitalSchema } from '../src/common/mqtt-payload';
 
@@ -41,6 +48,25 @@ const CASES: [string, string, boolean][] = [
     '{"victim_rfid":"04A2B3","hr":118,"rr":28,"battery":76,"priority":"YELLOW","confidence":0.72,"packet_counter":1421,"device_status":0}',
     true,
   ],
+  // LORA_VITAL_VERSION 0x02 shapes: esi/age/gender ride after confidence, in
+  // the emitter's key order. Each is omitted independently -- an answered Age
+  // screen does not imply the model scored, and a scored model does not imply
+  // the operator answered.
+  [
+    'v0x02: Age screen answered, model scored',
+    '{"victim_rfid":"04A2B3","hr":118,"spo2":91,"rr":28,"battery":76,"priority":"RED","confidence":0.87,"esi":2,"age":72,"gender":"M","packet_counter":1421,"device_status":0,"ts":1755500000}',
+    true,
+  ],
+  [
+    'v0x02: Age screen never answered, model gave no ESI (the common case)',
+    '{"victim_rfid":"04A2B3","hr":118,"spo2":91,"rr":28,"battery":76,"priority":"GREEN","confidence":0.9,"packet_counter":1421,"device_status":0}',
+    true,
+  ],
+  [
+    'v0x02: model scored an ESI, Age screen still unanswered',
+    '{"victim_rfid":"04A2B3","hr":78,"spo2":98,"rr":16,"battery":76,"priority":"GREEN","confidence":0.81,"esi":4,"packet_counter":1421,"device_status":0}',
+    true,
+  ],
   // Priority stays mandatory: it drives triage, the KPIs and the alerts, so the
   // station suppresses these two instead of publishing them.
   [
@@ -60,6 +86,9 @@ const MUST_REJECT: [string, string][] = [
   ['priority out of enum', '{"hr":90,"priority":"PURPLE"}'],
   ['triage_level above 3', '{"hr":90,"triage_level":4}'],
   ['number sent as string', '{"hr":"90","priority":"RED"}'],
+  ['esi above the 1..5 scale', '{"priority":"GREEN","esi":6}'],
+  ['age over the wire byte bound', '{"priority":"GREEN","age":121}'],
+  ['gender other than M/F', '{"priority":"GREEN","gender":"U"}'],
 ];
 
 let failed = 0;
@@ -77,9 +106,20 @@ for (const [label, json, shouldAccept] of CASES) {
   }
   // An accepted sparse payload must yield null, never a fabricated 0.
   if (r.success) {
-    const zeroed = (['hr', 'spo2', 'rr', 'battery', 'confidence'] as const).filter(
-      (k) => !(k in JSON.parse(json)) && r.data[k] !== null,
-    );
+    const zeroed = (
+      [
+        'hr',
+        'spo2',
+        'rr',
+        'battery',
+        'confidence',
+        // age 0 would read as a newborn and esi 0 as a class that does not
+        // exist, so absent has to stay null for these two as hard as for hr.
+        'esi',
+        'age',
+        'gender',
+      ] as const
+    ).filter((k) => !(k in JSON.parse(json)) && r.data[k] !== null);
     if (zeroed.length > 0) {
       failed++;
       console.error(`FAIL  ${label}\n      absent keys became non-null: ${zeroed.join(', ')}`);
@@ -95,6 +135,22 @@ for (const [label, json, shouldAccept] of CASES) {
       failed++;
       console.error(
         `FAIL  ${label}\n      victim_rfid: got ${String(r.data.victim_rfid)}, want ${String(want)}`,
+      );
+      continue;
+    }
+    // And the other half: a key that IS present must arrive unchanged. Absent
+    // staying null is worthless if a present esi is dropped on the floor -- the
+    // whole point of esi is the ESI 3 vs 5 distinction the colour cannot carry.
+    const src = JSON.parse(json) as Record<string, unknown>;
+    const dropped = (['esi', 'age', 'gender'] as const).filter(
+      (k) => k in src && r.data[k] !== src[k],
+    );
+    if (dropped.length > 0) {
+      failed++;
+      console.error(
+        `FAIL  ${label}\n      present keys did not survive: ${dropped
+          .map((k) => `${k} ${String(src[k])} -> ${String(r.data[k])}`)
+          .join(', ')}`,
       );
       continue;
     }
