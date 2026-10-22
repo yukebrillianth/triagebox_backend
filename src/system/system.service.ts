@@ -1,8 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { DeviceStatus, Priority, Victim } from '@prisma/client';
+import { DeviceStatus, Priority } from '@prisma/client';
+import { LINK_STALE_SEC, nodeOfflineSec, pollPeriodSec } from '../common/timing';
 import { ActivityService } from '../activity/activity.service';
 import { MqttService } from '../mqtt/mqtt.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { toVictimView, VictimView } from '../victims/victim-view';
 import { VictimsService } from '../victims/victims.service';
 
 export interface KpiResponse {
@@ -36,8 +38,18 @@ export interface HealthResponse {
   uptimeSec: number;
 }
 
+export interface TimingSettings {
+  pollPeriodSec: number;
+  nodeOfflineSec: number;
+  linkStaleSec: number;
+}
+
+export type SettingsResponse = Record<string, string | TimingSettings> & {
+  timing: TimingSettings;
+};
+
 export interface ReportsSummary {
-  victims: Victim[];
+  victims: VictimView[];
   counts: { total: number; byPriority: Record<Priority, number> };
   triageHistoryCount: number;
   recentActivity: Awaited<ReturnType<ActivityService['list']>>;
@@ -151,6 +163,18 @@ export class SystemService {
     };
   }
 
+  /** Stored key-values plus the read-only `timing` block the dashboard shows. */
+  async getSettingsWithTiming(): Promise<SettingsResponse> {
+    return {
+      ...(await this.getSettings()),
+      timing: {
+        pollPeriodSec: pollPeriodSec(),
+        nodeOfflineSec: nodeOfflineSec(),
+        linkStaleSec: LINK_STALE_SEC,
+      },
+    };
+  }
+
   async getSettings(): Promise<Record<string, string>> {
     const rows = await this.prisma.setting.findMany();
     const out: Record<string, string> = {};
@@ -160,7 +184,7 @@ export class SystemService {
     return out;
   }
 
-  async putSettings(body: Record<string, unknown>): Promise<Record<string, string>> {
+  async putSettings(body: Record<string, unknown>): Promise<SettingsResponse> {
     if (body === null || typeof body !== 'object' || Array.isArray(body)) {
       throw new BadRequestException('body must be a JSON object of key-value pairs');
     }
@@ -185,7 +209,7 @@ export class SystemService {
         update: { value: str },
       });
     }
-    return this.getSettings();
+    return this.getSettingsWithTiming();
   }
 
   async getReportsSummary(): Promise<ReportsSummary> {
@@ -199,7 +223,8 @@ export class SystemService {
     const total =
       byPriority.RED + byPriority.YELLOW + byPriority.GREEN + byPriority.BLACK;
     return {
-      victims,
+      // Masked like the list endpoint: the report must not carry the NIK.
+      victims: victims.map((v) => toVictimView(v, false)),
       counts: { total, byPriority },
       triageHistoryCount,
       recentActivity,

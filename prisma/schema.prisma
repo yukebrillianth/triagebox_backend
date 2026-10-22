@@ -14,6 +14,22 @@ enum Priority {
   BLACK
 }
 
+/// Where a patient is in the care flow. Anything but ACTIVE leaves the active
+/// list and the active-patient KPIs; a new device reading reactivates (see
+/// VictimsService.upsertFromVital) so a live patient can never stay hidden.
+enum VictimStatus {
+  ACTIVE
+  REFERRED
+  DISCHARGED
+  DECEASED
+}
+
+/// Who decided a triage category: the node's model, or a person at the post.
+enum TriageSource {
+  DEVICE
+  OPERATOR
+}
+
 enum DeviceStatus {
   ONLINE
   OFFLINE
@@ -26,65 +42,112 @@ enum AlertSeverity {
 }
 
 model Station {
-  id               String       @id
-  name             String
-  status           DeviceStatus @default(OFFLINE)
-  lastSeen         DateTime?
-  firmware         String?
-  ipAddress        String?
-  mqttBrokerHost   String?
-  mqttBrokerPort   Int?         @default(1883)
-  notes            String?
-  isActive         Boolean      @default(true)
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
-  nodes            Node[]
+  id             String       @id
+  name           String
+  status         DeviceStatus @default(OFFLINE)
+  lastSeen       DateTime?
+  firmware       String?
+  ipAddress      String?
+  mqttBrokerHost String?
+  mqttBrokerPort Int?         @default(1883)
+  notes          String?
+  /// Health post this station serves, free text. No coordinates by design.
+  postName       String?
+  locationLabel  String?
+  nodeCapacity   Int          @default(20)
+  /// Seconds between full poll cycles; null falls back to STATION_POLL_PERIOD_SEC.
+  pollPeriodSec  Int?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  nodes          Node[]
 }
 
 model Node {
-  id               String       @id
-  stationId        String
-  station          Station      @relation(fields: [stationId], references: [id])
-  name             String
-  status           DeviceStatus @default(OFFLINE)
-  rssi             Int?
-  snr              Float?
-  battery          Int?
-  firmware         String?
-  packetCount      Int          @default(0)
-  lastSeen         DateTime?
+  id              String       @id
+  stationId       String
+  station         Station      @relation(fields: [stationId], references: [id])
+  name            String
+  status          DeviceStatus @default(OFFLINE)
+  rssi            Int?
+  snr             Float?
+  battery         Int?
+  firmware        String?
+  packetCount     Int          @default(0)
+  lastSeen        DateTime?
   // ponytail: current victim is a plain ID to avoid a circular FK; add a relation if DB-level integrity becomes necessary.
-  currentVictimId  String?
-  isActive         Boolean      @default(true)
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  currentVictimId String?
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  linkSamples LinkSample[]
 
   @@index([stationId])
 }
 
+/// One answered poll: the packet-level record the loss report counts. The
+/// station publishes one status message per answering node per cycle, so rows
+/// here are packets RECEIVED; expected packets come from the poll schedule.
+model LinkSample {
+  id            String   @id @default(cuid())
+  nodeId        String
+  node          Node     @relation(fields: [nodeId], references: [id])
+  receivedAt    DateTime @default(now())
+  rssi          Int?
+  snr           Float?
+  /// The node's own transmit counter, for spotting replies lost on the air.
+  packetCounter Int?
+
+  @@index([nodeId, receivedAt])
+}
+
 model Victim {
-  id              String          @id @default(cuid())
-  rfid            String          @unique
-  name            String?
-  age             Int?
-  gender          String?
-  notes           String?
-  currentPriority Priority?
-  confidence      Float?
-  reasons         Json?
-  currentNodeId   String?
-  firstSeen       DateTime        @default(now())
-  lastUpdate      DateTime        @default(now())
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  vitalReadings   VitalReading[]
-  triageHistory   TriageHistory[]
+  id                  String          @id @default(cuid())
+  rfid                String          @unique
+  name                String?
+  age                 Int?
+  gender              String?
+  notes               String?
+  /// Identity and care-flow fields are typed in at the post, never sent by a node.
+  /// nik is personal data (UU 27/2022): masked in lists, full only on the detail
+  /// route, and kept out of logs, alerts, activity and reports.
+  nik                 String?
+  address             String?
+  familyContactName   String?
+  familyContactPhone  String?
+  chiefComplaint      String?
+  status              VictimStatus    @default(ACTIVE)
+  referredAt          DateTime?
+  referralDestination String?
+  statusChangedBy     String?
+  /// When the displayed blood pressure last changed: it is estimated once and
+  /// latched on the node, so it is not live like HR/SpO2.
+  bpMeasuredAt        DateTime?
+  /// ECG | PPG; null until the wire carries it.
+  hrSource            String?
+  /// The category the node's model last reported. currentPriority is what is
+  /// SHOWN: equal to this unless an operator override is standing.
+  devicePriority      Priority?
+  overridePriority    Priority?
+  overrideReason      String?
+  overrideAt          DateTime?
+  currentPriority     Priority?
+  confidence          Float?
+  reasons             Json?
+  currentNodeId       String?
+  firstSeen           DateTime        @default(now())
+  lastUpdate          DateTime        @default(now())
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  vitalReadings       VitalReading[]
+  triageHistory       TriageHistory[]
 }
 
 model VitalReading {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   victimId     String
-  victim       Victim   @relation(fields: [victimId], references: [id])
+  victim       Victim    @relation(fields: [victimId], references: [id])
   nodeId       String
   /// Nullable because the station omits a key rather than sending 0: hr 0 is a
   /// dead patient and battery 0 is a flat node, so an invented zero would be
@@ -108,15 +171,15 @@ model VitalReading {
   /// OK / ERROR / device_status uint from node
   deviceStatus String?
   deviceTs     DateTime?
-  receivedAt   DateTime @default(now())
+  receivedAt   DateTime  @default(now())
 
   @@index([victimId, receivedAt])
 }
 
 model TriageHistory {
-  id           String   @id @default(cuid())
+  id           String       @id @default(cuid())
   victimId     String
-  victim       Victim   @relation(fields: [victimId], references: [id])
+  victim       Victim       @relation(fields: [victimId], references: [id])
   fromPriority Priority
   toPriority   Priority
   confidence   Float?
@@ -125,7 +188,10 @@ model TriageHistory {
   /// verdict should carry the raw score the displayed verdict came from.
   esi          Int?
   nodeId       String?
-  createdAt    DateTime @default(now())
+  /// DEVICE for a model verdict, OPERATOR for a person's override.
+  source       TriageSource @default(DEVICE)
+  reason       String?
+  createdAt    DateTime     @default(now())
 }
 
 model Alert {

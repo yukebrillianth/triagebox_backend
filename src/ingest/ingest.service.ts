@@ -97,6 +97,8 @@ export class IngestService {
       // stays on VitalReading below.
       age: payload.age,
       gender: payload.gender,
+      bpSys: payload.bp_sys ?? null,
+      bpDia: payload.bp_dia ?? null,
     };
 
     // 1) Victim snapshot (may skip update if stale by deviceTs).

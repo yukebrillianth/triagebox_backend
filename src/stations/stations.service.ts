@@ -5,17 +5,26 @@ import {
 } from '@nestjs/common';
 import { PendingStation, Station } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { pollPeriodSec as defaultPollPeriodSec } from '../common/timing';
 import { AdoptStationDto } from './dto/adopt-station.dto';
 import { CreateStationDto } from './dto/create-station.dto';
 import { UpdateStationDto } from './dto/update-station.dto';
 
 export type { PendingStation, Station };
-export type StationWithNodeCount = Station & { nodeCount: number };
+export type StationWithNodeCount = Omit<Station, 'pollPeriodSec'> & {
+  nodeCount: number;
+  /** Effective: the station's own setting, else STATION_POLL_PERIOD_SEC. */
+  pollPeriodSec: number;
+};
 
 type StationRow = Station & { _count: { nodes: number } };
 
 function withNodeCount({ _count, ...s }: StationRow): StationWithNodeCount {
-  return { ...s, nodeCount: _count.nodes };
+  return {
+    ...s,
+    nodeCount: _count.nodes,
+    pollPeriodSec: s.pollPeriodSec ?? defaultPollPeriodSec(),
+  };
 }
 
 function isPrismaUniqueViolation(err: unknown): boolean {
@@ -60,6 +69,10 @@ export class StationsService {
           mqttBrokerHost: dto.mqttBrokerHost,
           mqttBrokerPort: dto.mqttBrokerPort,
           notes: dto.notes,
+          postName: dto.postName,
+          locationLabel: dto.locationLabel,
+          nodeCapacity: dto.nodeCapacity,
+          pollPeriodSec: dto.pollPeriodSec,
         },
         include: { _count: { select: { nodes: true } } },
       });
@@ -86,6 +99,10 @@ export class StationsService {
         mqttBrokerHost: dto.mqttBrokerHost,
         mqttBrokerPort: dto.mqttBrokerPort,
         notes: dto.notes,
+        postName: dto.postName,
+        locationLabel: dto.locationLabel,
+        nodeCapacity: dto.nodeCapacity,
+        pollPeriodSec: dto.pollPeriodSec,
       },
       include: { _count: { select: { nodes: true } } },
     });
