@@ -5,6 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { DeviceStatus, Node, Priority, Station } from '@prisma/client';
+import { linkWindow } from '../common/link-stats';
+import { pollPeriodSec as defaultPollPeriodSec } from '../common/timing';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateNodeDto } from './dto/create-node.dto';
 import { UpdateNodeDto } from './dto/update-node.dto';
@@ -21,6 +23,10 @@ export type VictimSummary = {
 export type NodeResponse = Node & {
   station: Station;
   currentVictim: VictimSummary | null;
+  /** Polls scheduled since the first answer; null before any link sample. */
+  expectedPackets: number | null;
+  /** 0-100 with one decimal; null until there is something to compare. */
+  packetLossPct: number | null;
 };
 
 type NodeWithStation = Node & { station: Station };
@@ -77,7 +83,12 @@ export class NodesService {
         },
         include: { station: true },
       });
-      return { ...node, currentVictim: null };
+      return {
+        ...node,
+        currentVictim: null,
+        expectedPackets: null,
+        packetLossPct: null,
+      };
     } catch (err: unknown) {
       if (isPrismaUniqueViolation(err)) {
         throw new ConflictException(`Node id '${dto.id}' already exists`);
@@ -177,11 +188,35 @@ export class NodesService {
         } satisfies VictimSummary,
       ]),
     );
-    return nodes.map((n) => ({
-      ...n,
-      currentVictim: n.currentVictimId
-        ? (byId.get(n.currentVictimId) ?? null)
-        : null,
-    }));
+    const samples = await this.prisma.linkSample.groupBy({
+      by: ['nodeId'],
+      where: { nodeId: { in: nodes.map((n) => n.id) } },
+      _count: { _all: true },
+      _min: { receivedAt: true },
+    });
+    const sampleByNode = new Map(samples.map((s) => [s.nodeId, s]));
+    const now = Date.now();
+    return nodes.map((n) => {
+      const sample = sampleByNode.get(n.id);
+      const from = sample?._min.receivedAt;
+      const to =
+        n.status === DeviceStatus.ONLINE ? now : (n.lastSeen?.getTime() ?? now);
+      const w = from
+        ? linkWindow(
+            from.getTime(),
+            to,
+            n.station.pollPeriodSec ?? defaultPollPeriodSec(),
+            sample._count._all,
+          )
+        : null;
+      return {
+        ...n,
+        currentVictim: n.currentVictimId
+          ? (byId.get(n.currentVictimId) ?? null)
+          : null,
+        expectedPackets: w ? w.expected : null,
+        packetLossPct: w ? w.lossPct : null,
+      };
+    });
   }
 }

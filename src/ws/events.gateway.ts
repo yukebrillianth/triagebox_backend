@@ -14,6 +14,7 @@ import type {
   VitalIngestedEvent,
 } from '../alerts/alerts.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { toVictimView } from '../victims/victim-view';
 import { VictimsService } from '../victims/victims.service';
 
 export interface NodeStatusEvent {
@@ -76,13 +77,14 @@ export class EventsGateway
 
   @OnEvent('victim.created')
   onVictimCreated(event: VictimCreatedEvent): void {
-    this.broadcast('victim.created', event.victim);
+    // Never the raw row: it carries the NIK and the override bookkeeping.
+    this.broadcast('victim.created', toVictimView(event.victim, false));
     void this.emitKpi();
   }
 
   @OnEvent('victim.updated')
   onVictimUpdated(event: { victim: Victim }): void {
-    this.broadcast('victim.updated', event.victim);
+    this.broadcast('victim.updated', toVictimView(event.victim, false));
   }
 
   @OnEvent('priority.changed')

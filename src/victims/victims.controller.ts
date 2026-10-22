@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   DefaultValuePipe,
@@ -6,10 +7,18 @@ import {
   Param,
   ParseIntPipe,
   Patch,
+  Post,
   Query,
 } from '@nestjs/common';
-import { Priority, TriageHistory, Victim, VitalReading } from '@prisma/client';
+import {
+  Priority,
+  TriageHistory,
+  VictimStatus,
+  VitalReading,
+} from '@prisma/client';
+import { OverrideVictimDto } from './dto/override-victim.dto';
 import { UpdateVictimDto } from './dto/update-victim.dto';
+import { VictimView } from './victim-view';
 import { VictimsService } from './victims.service';
 
 @Controller('api/victims')
@@ -22,8 +31,14 @@ export class VictimsController {
     @Query('priority') priority?: Priority,
     @Query('nodeId') nodeId?: string,
     @Query('sort') sort?: 'lastUpdate_desc' | 'lastUpdate_asc' | 'rfid',
-  ): Promise<Victim[]> {
-    return this.victimsService.findAll({ search, priority, nodeId, sort });
+    @Query('status') status?: VictimStatus,
+  ): Promise<VictimView[]> {
+    if (status !== undefined && !(status in VictimStatus)) {
+      throw new BadRequestException(
+        `status must be one of ${Object.values(VictimStatus).join(', ')}`,
+      );
+    }
+    return this.victimsService.findAll({ search, priority, nodeId, sort, status });
   }
 
   @Get(':id/vitals')
@@ -40,7 +55,7 @@ export class VictimsController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string): Promise<Victim> {
+  findOne(@Param('id') id: string): Promise<VictimView> {
     return this.victimsService.findOne(id);
   }
 
@@ -48,7 +63,15 @@ export class VictimsController {
   update(
     @Param('id') id: string,
     @Body() dto: UpdateVictimDto,
-  ): Promise<Victim> {
+  ): Promise<VictimView> {
     return this.victimsService.update(id, dto);
+  }
+
+  @Post(':id/override')
+  override(
+    @Param('id') id: string,
+    @Body() dto: OverrideVictimDto,
+  ): Promise<VictimView> {
+    return this.victimsService.override(id, dto);
   }
 }

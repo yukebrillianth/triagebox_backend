@@ -121,6 +121,9 @@ export const vitalSchema = z
     // holds 200 happily and no patient does.
     age: z.number().int().min(0).max(120).optional(),
     gender: genderSchema.optional(),
+    // Which sensor the hr came from: the node prefers ECG and falls back to PPG,
+    // and only the ECG rate has been validated against a reference.
+    hr_source: z.enum(['ECG', 'PPG']).optional(),
     reasons: z.array(z.string()).default([]),
     ts: z.union([z.string(), z.number()]).optional(),
     timestamp: z.union([z.string(), z.number()]).optional(),
@@ -159,6 +162,7 @@ export const vitalSchema = z
       esi: noneIfZero(raw.esi),
       age: noneIfZero(raw.age),
       gender: raw.gender ?? null,
+      hr_source: raw.hr_source ?? null,
       reasons: raw.reasons ?? [],
       ts,
       ecg_status:

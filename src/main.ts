@@ -1,6 +1,7 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { assertTimingInvariants } from './common/timing';
 
 function corsOrigin(): boolean | string | string[] {
   const raw = process.env.CORS_ORIGIN ?? '*';
@@ -10,6 +11,7 @@ function corsOrigin(): boolean | string | string[] {
 }
 
 async function bootstrap(): Promise<void> {
+  assertTimingInvariants();
   const app = await NestFactory.create(AppModule);
   app.enableCors({
     origin: corsOrigin(),

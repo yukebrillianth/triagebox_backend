@@ -10,7 +10,9 @@
     "prisma:generate": "prisma generate",
     "check:station": "ts-node scripts/check-station-payload.ts",
     "field-test": "node scripts/field-test.js",
-    "seed": "ts-node scripts/seed.ts"
+    "seed": "ts-node scripts/seed.ts",
+    "check:logic": "ts-node scripts/check-logic.ts",
+    "report:link": "ts-node scripts/report-link.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.6",

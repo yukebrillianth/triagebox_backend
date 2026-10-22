@@ -58,6 +58,21 @@ const CASES: [string, string, boolean][] = [
     true,
   ],
   [
+    'v0x02: hr_source ECG',
+    '{"victim_rfid":"04A2B3","hr":118,"hr_source":"ECG","priority":"GREEN","confidence":0.8,"packet_counter":1,"device_status":0}',
+    true,
+  ],
+  [
+    'v0x02: hr_source PPG fallback',
+    '{"victim_rfid":"04A2B3","hr":118,"hr_source":"PPG","priority":"GREEN","confidence":0.8,"packet_counter":1,"device_status":0}',
+    true,
+  ],
+  [
+    'v0x02: hr_source not ECG or PPG is rejected',
+    '{"victim_rfid":"04A2B3","hr":118,"hr_source":"RADAR","priority":"GREEN","confidence":0.8,"packet_counter":1,"device_status":0}',
+    false,
+  ],
+  [
     'v0x02: Age screen never answered, model gave no ESI (the common case)',
     '{"victim_rfid":"04A2B3","hr":118,"spo2":91,"rr":28,"battery":76,"priority":"GREEN","confidence":0.9,"packet_counter":1421,"device_status":0}',
     true,

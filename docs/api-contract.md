@@ -213,11 +213,12 @@ All paths return JSON. List resources use arrays unless a wrapper is shown.
 | Method/path                          | Minimal request/response shape                                                                                 |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `GET /api/kpis`                      | `{ total, byPriority: { RED, YELLOW, GREEN, BLACK }, onlineNodes, totalNodes, onlineStations, totalStations }` |
-| `GET /api/victims`                   | `Victim[]`                                                                                                     |
-| `GET /api/victims/:id`               | `Victim`                                                                                                       |
+| `GET /api/victims`                   | `Victim[]` — NIK masked (`nikMasked`), never the full `nik`. Optional `?status=ACTIVE\|REFERRED\|DISCHARGED\|DECEASED` (400 otherwise); no `status` returns all. |
+| `GET /api/victims/:id`               | `Victim` — the ONLY response that carries the full `nik`                                                       |
 | `GET /api/victims/:id/vitals`        | `VitalReading[]` — per-reading history, newest first                                                           |
 | `GET /api/victims/:id/triage-history`| `TriageHistory[]` — priority transitions, newest first                                                         |
-| `PATCH /api/victims/:id`             | `{ name?, age?, gender?, notes? }` → `Victim` — operator corrections; `gender` accepts `"U"` here              |
+| `PATCH /api/victims/:id`             | `{ name?, age?, gender?, notes?, nik?, address?, familyContactName?, familyContactPhone?, chiefComplaint?, status?, referralDestination?, statusChangedBy? }` → `Victim` (detail view). `nik` must be exactly 16 digits (400). `gender` accepts `"U"` here. |
+| `POST /api/victims/:id/override`     | `{ priority, reason }` → `Victim` (detail view). `reason` is required and non-blank (400). See "Operator override". |
 | `GET /api/nodes`                     | `Node[]`                                                                                                       |
 | `POST /api/nodes`                    | node registration fields → `Node`                                                                              |
 | `GET/PATCH/DELETE /api/nodes/:id`    | `Node`                                                                                                         |
@@ -230,8 +231,8 @@ All paths return JSON. List resources use arrays unless a wrapper is shown.
 | `GET /api/alerts`                    | `Alert[]`                                                                                                      |
 | `GET /api/activity`                  | `Activity[]`                                                                                                   |
 | `GET /api/analytics/summary`         | `{ byPriority, hourlyTrend, activeNodes, avgBatteryByNode, latestSignalByNode }`                               |
-| `GET /api/settings`                  | `{ [key: string]: string }`                                                                                    |
-| `PUT /api/settings`                  | key/value object → updated key/value object                                                                    |
+| `GET /api/settings`                  | `{ [key: string]: string, timing: { pollPeriodSec, nodeOfflineSec, linkStaleSec } }` — `timing` is read-only, see `docs/timing.md` |
+| `PUT /api/settings`                  | key/value object → same shape as `GET` (a `timing` key in the body is ignored on read)                        |
 | `GET /api/health`                    | `{ status, db, mqtt, uptimeSec }`                                                                              |
 | `GET /api/reports/summary`           | `{ victims, counts, triageHistoryCount, activityTimeline }`                                                    |
 
@@ -255,6 +256,24 @@ type Victim = {
   confidence?: number | null;
   reasons?: string[];
   lastSeen?: string | null;
+
+  // Identity and care flow -- typed at the post, never sent by or to a node.
+  nik?: string | null; // 16 digits; DETAIL ONLY (GET /api/victims/:id, PATCH, override)
+  nikMasked: string | null; // "3578********0001"; every response
+  address?: string | null;
+  familyContactName?: string | null;
+  familyContactPhone?: string | null;
+  chiefComplaint?: string | null;
+  status: "ACTIVE" | "REFERRED" | "DISCHARGED" | "DECEASED";
+  referredAt?: string | null; // set when status becomes REFERRED
+  referralDestination?: string | null;
+  statusChangedBy?: string | null; // 'device' when a reading reactivated the patient
+  bpMeasuredAt?: string | null; // when bpSys/bpDia last CHANGED: BP is re-measured at each re-triage; stamp moves only when the value changes
+  hrSource?: "ECG" | "PPG" | null; // from the station's hr_source; null until a reading with hr + source arrives
+
+  // Operator override (see below)
+  operatorOverride: { priority: Priority; reason: string; at: string } | null;
+  deviceDiffersFromOperator: boolean;
 };
 
 // GET /api/victims/:id/vitals — VitalReading rows, newest first
@@ -288,6 +307,8 @@ type TriageHistory = {
   reasons: string[] | null;
   esi: number | null; // ESI in force at the transition, when known
   nodeId: string | null;
+  source: "DEVICE" | "OPERATOR"; // who decided the category
+  reason: string | null; // the operator's reason; null for DEVICE
   createdAt: string;
 };
 
@@ -300,12 +321,19 @@ type Node = {
   rssi?: number | null;
   snr?: number | null;
   lastSeen?: string | null;
+  packetCount: number; // the node's own transmit counter, as last reported
+  expectedPackets: number | null; // polls scheduled since the first answer; null before any
+  packetLossPct: number | null; // 0-100, one decimal; coarse -- use `npm run report:link` for a test window
 };
 type Station = {
   id: string;
   name: string;
   status: "ONLINE" | "OFFLINE";
   lastSeen?: string | null;
+  postName?: string | null; // health post name, free text
+  locationLabel?: string | null; // village / sub-district, free text. No coordinates by design
+  nodeCapacity: number; // default 20
+  pollPeriodSec: number; // effective: the station's own value, else STATION_POLL_PERIOD_SEC
 };
 type Alert = {
   id: string;
@@ -321,6 +349,28 @@ type Activity = {
   createdAt: string;
 };
 ```
+
+### Operator override
+
+`POST /api/victims/:id/override { priority, reason }` makes a person's category the
+displayed one (`currentPriority`) and records a `TriageHistory` row with
+`source: "OPERATOR"` and the reason. The node cannot be told: later readings keep
+updating the device's own category but do NOT replace the standing override;
+`deviceDiffersFromOperator` is `true` while they disagree, and a device-side
+transition still raises its usual alert. Calling it again replaces the override.
+
+### Care-flow status
+
+`status` other than `ACTIVE` takes the patient out of `GET /api/victims?status=ACTIVE`
+and out of the active-patient KPIs (`/api/kpis`, `kpi.updated`). A new reading from a
+node sets the patient back to `ACTIVE` (`statusChangedBy: "device"`, activity
+`victim_reactivated`): someone on a node must never stay hidden.
+
+### Personal data (UU 27/2022)
+
+`nik` is returned in full only by the detail view. It is not written to logs, alerts,
+activity, `/api/reports/summary`, or Socket.IO events (`victim.*` carry the masked
+view), and nothing in the MQTT/LoRa path ever carries it.
 
 ## WebSocket events
 

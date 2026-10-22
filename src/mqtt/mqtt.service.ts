@@ -226,6 +226,20 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         }),
       },
     });
+    if (next === DeviceStatus.ONLINE) {
+      // One status per answering node per cycle = one received poll. This is the
+      // packet-level record behind the loss figures (see common/link-stats.ts).
+      await this.prisma.linkSample.create({
+        data: {
+          nodeId,
+          receivedAt: lastSeen,
+          rssi: parsed.data.rssi ?? null,
+          snr: parsed.data.snr ?? null,
+          packetCounter:
+            parsed.data.packet_count ?? parsed.data.packet_counter ?? null,
+        },
+      });
+    }
     this.eventEmitter.emit('node.status', {
       nodeId,
       status: next,

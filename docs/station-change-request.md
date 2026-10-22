@@ -349,6 +349,27 @@ Kandidatnya harus muncul di `GET /api/stations/pending` dan di panel "Menunggu
 adopsi" pada `/perangkat`. Alur lengkapnya sudah saya uji end-to-end lewat
 browser: announce → pending → Adopt → node terbentuk → vital diterima.
 
+## Pembaruan 2026-10-22 (station: PR #3 dan #4, sudah di-merge)
+
+Sama seperti di atas, diterapkan langsung atas persetujuan project leader.
+
+- **Payload v2 (PR #3).** Station sekarang mem-publish `esi`, `age`, `gender`,
+  pasangan dari paket LoRa v2 yang dikirim node. Backend sudah menerima ketiganya
+  (`esi` 0..5, jadi model 4 kelas ESI 1..4 pas), dan `npm run check:station`
+  memuat kasus v2.
+- **`tb_regs.h` disinkronkan** dengan salinan node: `TB_REG_HOST_NODE_ID 0x4C`,
+  `WRITE_END` pindah ke `0x4D`. Station tidak memakai register ini; tiga salinan
+  header harus tetap identik byte-per-byte.
+- **Default deployment (PR #4).** `sdkconfig.defaults` masih berisi nilai uji
+  jarak (siklus 3 detik, 1 node, log per-poll menyala). Sekarang `TB_NODE_COUNT=2`,
+  `TB_POLL_PERIOD_MS=15000`, log mati. Alasan: alamat poll node sekarang dipilih
+  dari Menu node (1..20), jadi station yang hanya memanggil 1..1 tidak akan pernah
+  melihat node ber-ID 2, dan node itu tampak mati tanpa pesan apa pun. **Naikkan
+  `TB_NODE_COUNT` bersamaan dengan jumlah board.** `sdkconfig` lokal yang sudah ada
+  tidak berubah sampai dibuat ulang (hapus, atau `idf.py reconfigure`).
+
+Bagian ESP-IDF station tetap belum dikompilasi di mesin ini.
+
 ## Yang belum diuji
 
 Bagian ESP-IDF-nya **belum dikompilasi** — tidak ada toolchain ESP-IDF di mesin
