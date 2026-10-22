@@ -268,7 +268,7 @@ type Victim = {
   referredAt?: string | null; // set when status becomes REFERRED
   referralDestination?: string | null;
   statusChangedBy?: string | null; // 'device' when a reading reactivated the patient
-  bpMeasuredAt?: string | null; // when bpSys/bpDia last CHANGED: BP is estimated once and latched
+  bpMeasuredAt?: string | null; // when bpSys/bpDia last CHANGED: BP is re-measured at each re-triage; stamp moves only when the value changes
   hrSource?: "ECG" | "PPG" | null; // from the station's hr_source; null until a reading with hr + source arrives
 
   // Operator override (see below)
