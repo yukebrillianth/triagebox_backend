@@ -269,7 +269,7 @@ type Victim = {
   referralDestination?: string | null;
   statusChangedBy?: string | null; // 'device' when a reading reactivated the patient
   bpMeasuredAt?: string | null; // when bpSys/bpDia last CHANGED: BP is estimated once and latched
-  hrSource?: "ECG" | "PPG" | null; // null until the wire carries it
+  hrSource?: "ECG" | "PPG" | null; // from the station's hr_source; null until a reading with hr + source arrives
 
   // Operator override (see below)
   operatorOverride: { priority: Priority; reason: string; at: string } | null;

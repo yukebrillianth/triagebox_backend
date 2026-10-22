@@ -39,6 +39,8 @@ export interface VitalDataPayload {
   /** Latched blood pressure from the node; see bpMeasuredAt on Victim. */
   bpSys?: number | null;
   bpDia?: number | null;
+  /** ECG | PPG; only meaningful with an hr in the same reading. */
+  hrSource?: 'ECG' | 'PPG' | null;
 }
 
 export interface UpsertVitalResult {
@@ -98,6 +100,8 @@ export class VictimsService {
           devicePriority: vitalData.priority,
           ...(vitalData.bpSys != null &&
             vitalData.bpDia != null && { bpMeasuredAt: receivedAt }),
+          ...(vitalData.hr != null &&
+            vitalData.hrSource != null && { hrSource: vitalData.hrSource }),
           confidence: vitalData.confidence,
           reasons: vitalData.reasons as unknown as Prisma.InputJsonValue,
           // `!= null`, not `!== undefined`: the device omits age/gender until the
@@ -188,6 +192,10 @@ export class VictimsService {
         // disagreement (deviceDiffersFromOperator) instead of hiding it.
         ...(!overrideStanding && { currentPriority: vitalData.priority }),
         ...(bpChanged && { bpMeasuredAt: receivedAt }),
+        // Only when this reading has an hr: a reading without one says nothing
+        // about which sensor the number on screen came from.
+        ...(vitalData.hr != null &&
+          vitalData.hrSource != null && { hrSource: vitalData.hrSource }),
         // A live reading means the patient is on a node: never leave them hidden
         // in a non-active list because somebody once marked them referred.
         ...(reactivated && {

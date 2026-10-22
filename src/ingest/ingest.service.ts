@@ -99,6 +99,7 @@ export class IngestService {
       gender: payload.gender,
       bpSys: payload.bp_sys ?? null,
       bpDia: payload.bp_dia ?? null,
+      hrSource: payload.hr_source ?? null,
     };
 
     // 1) Victim snapshot (may skip update if stale by deviceTs).
