@@ -78,7 +78,7 @@ assert.equal(timingProblems(NaN, 45).length, 1);
 // Re-triage choices: 1 / 5 / 15 min, never below one poll cycle.
 assert.deepEqual(RETRIAGE_CHOICES_SEC, [60, 300, 900]);
 assert.ok(RETRIAGE_CHOICES_SEC.includes(RETRIAGE_DEFAULT_SEC));
-assert.deepEqual(MEASURE_CHOICES_SEC, [30, 60]);
+assert.deepEqual(MEASURE_CHOICES_SEC, [60]);
 assert.deepEqual(timingProblems(15, 45, RETRIAGE_CHOICES_SEC), []);
 assert.deepEqual(timingProblems(60, 180, RETRIAGE_CHOICES_SEC), []); // equal is fine
 assert.equal(timingProblems(15, 45, [10, 60]).length, 1); // 10 s < one poll

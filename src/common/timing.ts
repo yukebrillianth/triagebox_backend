@@ -32,7 +32,7 @@ export const RETRIAGE_CHOICES_SEC = [60, 300, 900];
 export const RETRIAGE_DEFAULT_SEC = 300;
 
 /** First-measurement durations the node's Menu offers (the BP recording). */
-export const MEASURE_CHOICES_SEC = [30, 60];
+export const MEASURE_CHOICES_SEC = [60];
 
 /**
  * The offline threshold must outlast several missed cycles: one lost reply is
