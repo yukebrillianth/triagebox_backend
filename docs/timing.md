@@ -21,7 +21,7 @@ hubungannya. Kalau mengubah satu nilai, periksa aturan di bawah.
 1. **Klasifikasi ulang >= siklus poll.** Hasil antara yang lebih cepat dari satu siklus tidak pernah sampai ke dasbor. Pilihan Menu terkecil (15 s) = siklus deployment (15 s); `ui_settings_selftest` memastikan semua pilihan non-nol >= `UI_RETRIAGE_MIN_MS` (15 s, sama dengan `LORA_POLL_PERIOD_MS` station).
 2. **`NODE_OFFLINE_SEC` >= 3 × siklus poll.** Satu balasan LoRa hilang itu normal; di bawah tiga siklus node sehat berkedip OFFLINE/ONLINE dan membanjiri alert. Backend **menolak start** bila dilanggar (`assertTimingInvariants`, diuji di `npm run check:logic`).
 3. **`LINK_STALE_MS` hanya didefinisikan sekali** di firmware ESP32 (`ui_status.h`), jadi layar node dan logika status tidak bisa berbeda.
-4. **Siklus 20 node muat dalam periode.** 20 × (250 ms slot + jeda) ≈ 5,6 s < 15 s; station menolak konfigurasi yang tidak muat.
+4. **Siklus 20 node muat dalam periode.** 20 × (250 ms slot + 31 ms) ≈ 5,6 s < 15 s. Station hanya mencatat peringatan di log saat boot bila periode lebih kecil dari batas itu (periode tidak bisa di bawah jumlah slot); tidak menolak konfigurasi.
 5. **Siklus kerja radio.** Periode 15 s dengan 20 node ≈ 4%; di bawah 8 s dengan banyak node melewati batas ~10% yang dipakai dokumen station.
 
 `GET /api/settings` mengembalikan blok `timing` (`pollPeriodSec`, `nodeOfflineSec`, `linkStaleSec`) untuk halaman Pengaturan dasbor. Interval klasifikasi ulang hidup di node, bukan di backend, jadi tidak ada di blok itu.
